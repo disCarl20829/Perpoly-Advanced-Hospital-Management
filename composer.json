@@ -1,0 +1,8 @@
+{
+    "require": {
+        "typisttech/imposter": "^0.6.1",
+        "twbs/bootstrap": "^5.3",
+        "tecnickcom/tcpdf": "^6.11",
+        "components/font-awesome": "^6.5"
+    }
+}
