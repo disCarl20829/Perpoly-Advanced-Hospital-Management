@@ -1,46 +1,48 @@
 <?php
+
 /**
  * header.php — Global layout: <head>, sidebar, topbar
  *
  * HOW TO USE (at the top of every authenticated page):
  * -------------------------------------------------------
  *   <?php
- *   // 1. Set page variables BEFORE including header
- *   $pageTitle = 'My Page Title';   // shown in <title> and topbar
- *   $activeNav = 'dashboard';       // highlights the matching sidebar link
- *   $extraCss  = ['chat.css'];      // optional: extra CSS files from assets/css/
- *   $extraJs   = ['chat.js'];       // optional: extra JS files from assets/js/
+ *   $pageTitle = 'My Page Title';
+ *   $activeNav = 'dashboard';
+ *   $extraCss  = ['chat.css'];   // optional
+ *   $extraJs   = ['chat.js'];    // optional
  *
- *   // 2. Load config + includes (header.php does NOT re-load these)
- *   require_once __DIR__ . '/../config.php';   // adjust depth as needed
+ *   require_once __DIR__ . '/../config.php';
  *   require_once __DIR__ . '/../include/auth.php';
  *   require_once __DIR__ . '/../include/db.php';
- *   require_once __DIR__ . '/../include/func.php';
  *   require_once __DIR__ . '/../include/rbac.php';
+ *   require_once __DIR__ . '/../include/func.php';
  *   requireLogin();
- *   // ... your page logic (queries, POST handling) ...
  *
- *   // 3. Include header — starts HTML output
  *   require_once __DIR__ . '/../header.php';
  *   ?>
- *
- *   <!-- 4. Your page HTML goes here -->
  *   <div class="page-body"> ... </div>
- *
  *   <?php require_once __DIR__ . '/../footer.php'; ?>
  * -------------------------------------------------------
  *
  * $activeNav values: dashboard | doctors | patients | staff |
  *   appointments | reports | feedback | chat | dept-chat |
- *   directory | rooms
+ *   directory | rooms | chat-admin
  */
 
-// Guard: config must already be loaded by the calling page
+// ── Guard: config must already be loaded ──────────────────────
 if (!defined('APP_NAME')) {
     die('header.php: config.php must be loaded before including this file.');
 }
 
-$user = currentUser();
+// ── Safety net: auto-load rbac.php if the calling page forgot it ──
+// This prevents "Class RBAC not found" crashes from any page that
+// omits the include. require_once is safe — it won't double-load.
+if (!class_exists('RBAC', false)) {
+    // Walk up from header.php's own directory to find include/rbac.php
+    require_once __DIR__ . '/include/rbac.php';
+}
+
+$user  = currentUser();
 $flash = renderFlash();
 ?>
 <!DOCTYPE html>
@@ -58,20 +60,23 @@ $flash = renderFlash();
     <?php if (!empty($extraCss)):
         foreach ($extraCss as $css): ?>
             <link rel="stylesheet" href="<?= ASSET_PATH ?>/css/<?= e($css) ?>">
-        <?php endforeach; endif; ?>
+    <?php endforeach;
+    endif; ?>
 
     <link rel="icon" type="image/png" href="<?= ASSET_PATH ?>/images/logo.jpg">
 
-    <!-- Pass APP_URL to JS -->
-    <script>const APP_URL = '<?= APP_URL ?>';</script>
+    <!-- Pass APP_URL to JS so every page can build correct URLs -->
+    <script>
+        const APP_URL = '<?= APP_URL ?>';
+    </script>
 </head>
 
 <body>
     <div class="hms-shell">
 
         <!-- ════════════════════════════════════════
-     SIDEBAR
-     ════════════════════════════════════════ -->
+             SIDEBAR
+             ════════════════════════════════════════ -->
         <aside class="sidebar" id="sidebar">
 
             <!-- Brand -->
@@ -180,16 +185,16 @@ $flash = renderFlash();
         <!-- /sidebar -->
 
         <!-- ════════════════════════════════════════
-     MAIN CONTENT WRAPPER
-     ════════════════════════════════════════ -->
+             MAIN CONTENT WRAPPER
+             ════════════════════════════════════════ -->
         <div class="main-content">
 
             <!-- ── Topbar ── -->
             <header class="topbar">
-                <!-- Mobile hamburger (shown via CSS on small screens) -->
+                <!-- Mobile hamburger -->
                 <button class="topbar-icon-btn" id="menu-btn"
-                    onclick="document.getElementById('sidebar').classList.toggle('open')" style="display:none"
-                    aria-label="Open menu">☰</button>
+                    onclick="document.getElementById('sidebar').classList.toggle('open')"
+                    style="display:none" aria-label="Open menu">☰</button>
 
                 <span class="topbar-title"><?= e($pageTitle ?? 'Dashboard') ?></span>
 
@@ -198,19 +203,55 @@ $flash = renderFlash();
                     <input type="text" id="global-search" placeholder="Search patients, doctors…" autocomplete="off">
                 </div>
 
+                <script>
+                    document.getElementById('global-search').addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            var q = this.value.trim();
+                            if (q) {
+                                window.location.href = 'http://localhost/hms/search/appsearch.php?q=' + encodeURIComponent(q);
+                            }
+                        }
+                    });
+                </script>
+
                 <div class="topbar-actions">
                     <button class="topbar-icon-btn"
-                        onclick="window.location='<?= APP_URL ?>/intercom/channels/intercom-chat.php'" title="Messages">
+                        onclick="window.location='<?= APP_URL ?>/intercom/channels/intercom-chat.php'"
+                        title="Messages">
                         💬<span class="topbar-notif-dot" id="chat-dot" style="display:none"></span>
                     </button>
                     <button class="topbar-icon-btn" title="Notifications">🔔</button>
                 </div>
             </header>
 
-            <!-- ── Flash message (auto-clears after 5s via main.js) ── -->
-            <?php if ($flash):
-                echo $flash; endif; ?>
+            <!-- ── Flash message ── -->
+            <?php if ($flash): echo $flash;
+            endif; ?>
 
             <!-- ════════════════════════════════════════
-       PAGE CONTENT — your HTML goes below here
-       ════════════════════════════════════════ -->
+                 PAGE CONTENT — your HTML goes below here
+                 ════════════════════════════════════════ -->
+
+            <!-- Global search — navigates to correct APP_URL path -->
+            <script>
+                (function() {
+                    function attachSearch() {
+                        var inp = document.getElementById('global-search');
+                        if (!inp) return;
+                        var dest = APP_URL + '/search/appsearch.php';
+                        inp.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                var q = this.value.trim();
+                                if (q) window.location.href = dest + '?q=' + encodeURIComponent(q);
+                            }
+                        });
+                    }
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', attachSearch);
+                    } else {
+                        attachSearch();
+                    }
+                })();
+            </script>

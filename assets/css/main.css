@@ -8,7 +8,6 @@
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap');
-
 :root {
     /* Brand Colors */
     --navy: #1E4D7B;
@@ -16,13 +15,11 @@
     --navy-light: #2B6CA3;
     --navy-xlight: #D6E6F5;
     --navy-pale: #EBF3FA;
-
     --green: #5A8A1F;
     --green-dark: #406015;
     --green-light: #6FA024;
     --green-xlight: #D9EDB8;
     --green-pale: #EEF7DC;
-
     /* Neutrals */
     --white: #FFFFFF;
     --gray-50: #F7F9FB;
@@ -32,7 +29,6 @@
     --gray-500: #7A8EA3;
     --gray-700: #3D5166;
     --gray-900: #1A2733;
-
     /* Semantic */
     --danger: #C0392B;
     --danger-pale: #FCEAE8;
@@ -42,29 +38,29 @@
     --success-pale: #E8F8EE;
     --info: var(--navy-light);
     --info-pale: var(--navy-pale);
-
     /* Typography */
     --font-display: 'DM Serif Display', Georgia, serif;
     --font-body: 'DM Sans', system-ui, sans-serif;
-
     /* Spacing */
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 16px;
     --radius-xl: 24px;
-
     /* Shadows */
     --shadow-sm: 0 1px 3px rgba(30, 77, 123, 0.08), 0 1px 2px rgba(30, 77, 123, 0.06);
     --shadow-md: 0 4px 12px rgba(30, 77, 123, 0.10), 0 2px 6px rgba(30, 77, 123, 0.06);
     --shadow-lg: 0 8px 28px rgba(30, 77, 123, 0.13), 0 4px 10px rgba(30, 77, 123, 0.08);
-
     /* Sidebar width */
     --sidebar-w: 260px;
     --topbar-h: 64px;
 }
 
+
 /* ── Reset ────────────────────────────────────────── */
-*, *::before, *::after {
+
+*,
+*::before,
+*::after {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
@@ -101,13 +97,17 @@ ul {
     list-style: none;
 }
 
+
 /* ── Layout Shell ─────────────────────────────────── */
+
 .hms-shell {
     display: flex;
     min-height: 100vh;
 }
 
+
 /* ── Sidebar ──────────────────────────────────────── */
+
 .sidebar {
     width: var(--sidebar-w);
     background: var(--navy-dark);
@@ -203,7 +203,9 @@ ul {
     opacity: 1;
 }
 
+
 /* Chat badge */
+
 .nav-badge {
     margin-left: auto;
     background: var(--green-light);
@@ -280,7 +282,9 @@ ul {
     background: rgba(255, 60, 60, 0.08);
 }
 
+
 /* ── Main Content ─────────────────────────────────── */
+
 .main-content {
     margin-left: var(--sidebar-w);
     flex: 1;
@@ -289,7 +293,9 @@ ul {
     min-height: 100vh;
 }
 
+
 /* ── Top Bar ──────────────────────────────────────── */
+
 .topbar {
     height: var(--topbar-h);
     background: var(--white);
@@ -380,7 +386,9 @@ ul {
     border: 2px solid white;
 }
 
+
 /* ── Page Body ────────────────────────────────────── */
+
 .page-body {
     padding: 28px;
     flex: 1;
@@ -403,7 +411,9 @@ ul {
     margin-top: 4px;
 }
 
+
 /* ── Cards ────────────────────────────────────────── */
+
 .card {
     background: var(--white);
     border: 1px solid var(--gray-200);
@@ -437,7 +447,9 @@ ul {
     background: var(--gray-50);
 }
 
+
 /* ── Stat Cards ───────────────────────────────────── */
+
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -516,7 +528,9 @@ ul {
     color: var(--danger);
 }
 
+
 /* ── Buttons ──────────────────────────────────────── */
+
 .btn {
     display: inline-flex;
     align-items: center;
@@ -593,7 +607,9 @@ ul {
     justify-content: center;
 }
 
+
 /* ── Forms ────────────────────────────────────────── */
+
 .form-group {
     margin-bottom: 18px;
 }
@@ -648,7 +664,9 @@ ul {
     margin-top: 4px;
 }
 
+
 /* ── Table ────────────────────────────────────────── */
+
 .table-wrap {
     overflow-x: auto;
 }
@@ -689,7 +707,9 @@ tbody tr:hover {
     background: var(--gray-50);
 }
 
+
 /* ── Badges ───────────────────────────────────────── */
+
 .badge {
     display: inline-flex;
     align-items: center;
@@ -725,7 +745,9 @@ tbody tr:hover {
     color: var(--gray-700);
 }
 
+
 /* ── Alerts ───────────────────────────────────────── */
+
 .alert {
     padding: 13px 16px;
     border-radius: var(--radius-md);
@@ -760,7 +782,9 @@ tbody tr:hover {
     border-left: 3px solid var(--warning);
 }
 
+
 /* ── Auth Page ────────────────────────────────────── */
+
 .auth-page {
     min-height: 100vh;
     display: grid;
@@ -908,12 +932,13 @@ tbody tr:hover {
     box-shadow: var(--shadow-sm);
 }
 
+
 /* ── Responsive ───────────────────────────────────── */
+
 @media (max-width: 900px) {
     .auth-page {
         grid-template-columns: 1fr;
     }
-
     .auth-panel-left {
         display: none;
     }
@@ -923,27 +948,25 @@ tbody tr:hover {
     .sidebar {
         transform: translateX(-100%);
     }
-
     .sidebar.open {
         transform: translateX(0);
     }
-
     .main-content {
         margin-left: 0;
     }
-
     .stats-grid {
         grid-template-columns: 1fr 1fr;
     }
 }
 
+
 /* ── Animations ───────────────────────────────────── */
+
 @keyframes fadeUp {
     from {
         opacity: 0;
         transform: translateY(14px);
     }
-
     to {
         opacity: 1;
         transform: translateY(0);
