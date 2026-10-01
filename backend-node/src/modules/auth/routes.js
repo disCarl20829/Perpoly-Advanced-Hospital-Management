@@ -1,13 +1,16 @@
 import express from 'express';
-import db from '../../config/db.js';
+import * as authController from './controller.js.js';
+import authenticate from '../../middleware/auth.middleware.js';
+import authorize from '../../middleware/rbac.middleware.js';
 
 const router = express.Router();
 
-router.get('/', async (req, res) => {
-    const { rows } = await db.query('SELECT NOW()') ;
-    const timeResult = rows && rows.length > 0 ? rows[0].now : "No rows returned";
+// Public routes
+router.post('/login', authController.login);
+router.post('/refresh', authController.refresh);
 
-    res.json({ message: "Database connection successful!", time: timeResult });
-});
+// Protected routes
+router.post('/register', authenticate, authorize('superadmin'), authController.register);
+router.post('/logout', authenticate, authController.logout);
 
 export default router;
