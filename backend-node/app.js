@@ -23,12 +23,13 @@ app.get('/', (req, res) => {
     res.send('Welcome to the PerPoly API');
 });
 
+//app.use('/public')
 
 // Set-up Main Routes
 app.use('/auth', authRouter);
-/*
 app.use('/user', userRouter);
 app.use('/cashier', cashierRouter);
+/*
 app.use('/laboratory', laboratoryRouter);
 app.use('/inventory', inventoryRouter);
 app.use('/accounting', accountingRouter);
