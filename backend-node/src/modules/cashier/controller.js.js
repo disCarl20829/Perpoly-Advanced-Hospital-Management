@@ -12,10 +12,13 @@ export async function createPatient(req, res, next) {
     try {
         validateCreatePatient(req.body);
 
-        const { full_name, gender, birthdate, address, contact_no } = req.body;
+        const { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no } = req.body;
 
         const patient = await cashierService.createPatient({
-            full_name,
+            last_name,
+            first_name,
+            middle_name,
+            extra_name,
             gender,
             birthdate,
             address,

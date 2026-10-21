@@ -4,10 +4,10 @@
  * @throws {Error} if validation fails
  */
 export function validateCreatePatient(body) {
-    const { full_name } = body;
+    const { last_name, first_name } = body;
 
-    if (!full_name || full_name.trim().length < 2) {
-        const err = new Error('Full name is required (min 2 characters)');
+    if (!last_name || !first_name) {
+        const err = new Error('Last name and first name are required');
         err.status = 400;
         throw err;
     }

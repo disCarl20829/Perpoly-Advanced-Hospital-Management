@@ -39,7 +39,10 @@ CREATE TYPE accounting.export_type     AS ENUM ('per_system', 'master');
 
 CREATE TABLE authentication.users (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    full_name           TEXT NOT NULL,
+    last_name           TEXT NOT NULL,
+    first_name          TEXT NOT NULL,
+    middle_name         TEXT,
+    extra_name          TEXT,
     email               TEXT NOT NULL UNIQUE,
     password_hash       TEXT NOT NULL,
     preferred_system    authentication.system_name,       -- NULL = always show picker
@@ -68,7 +71,10 @@ INSERT INTO authentication.roles (name) VALUES
 
 CREATE TABLE cashier.patients (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    full_name       TEXT NOT NULL,
+    last_name       TEXT NOT NULL,
+    first_name      TEXT NOT NULL,
+    middle_name     TEXT,
+    extra_name      TEXT,
     gender          TEXT,
     birthdate       DATE,
     address         TEXT,
@@ -81,9 +87,21 @@ CREATE TABLE cashier.patients (
 CREATE TABLE cashier.transaction_types (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        TEXT NOT NULL,
-    category    TEXT NOT NULL,                       -- laboratory | ultrasound | 3d_echo | holter | ecg | other
+    category    TEXT NOT NULL,                       -- must match a laboratory.name for lab routing
     is_active   BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- Default transaction types. `category` matches a laboratory name so the
+-- laboratory can pick up the transaction as a pending test.
+INSERT INTO cashier.transaction_types (name, category) VALUES
+    ('Urinalysis', 'urinalysis'),
+    ('Fecalysis', 'fecalysis'),
+    ('CBC', 'CBC'),
+    ('X-Ray', 'x-ray'),
+    ('Ultrasound', 'ultrasound'),
+    ('2D Echo', '2D echo'),
+    ('Holter', 'holter'),
+    ('ECG', 'ECG');
 
 CREATE TABLE cashier.transactions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -105,6 +123,10 @@ CREATE TABLE cashier.transaction_items (
     unit_price              NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0),
     amount                  NUMERIC(12,2) NOT NULL CHECK (amount >= 0)
 );
+
+-- Internal receipt numbering (not a BIR OR). Created here for a clean
+-- schema run; the API also runs CREATE SEQUENCE IF NOT EXISTS as a safety net.
+CREATE SEQUENCE IF NOT EXISTS cashier.receipt_seq START 1;
 
 
 -- ------------------------------------------------------------
@@ -135,6 +157,11 @@ CREATE TABLE laboratory.laboratories (
     id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name    TEXT NOT NULL UNIQUE       -- urinalysis, fecalysis, CBC, x-ray, ultrasound, 2D echo, holter, ECG
 );
+
+-- Default laboratories (matches transaction_types.category below)
+INSERT INTO laboratory.laboratories (name) VALUES
+    ('urinalysis'), ('fecalysis'), ('CBC'), ('x-ray'),
+    ('ultrasound'), ('2D echo'), ('holter'), ('ECG');
 
 CREATE TABLE laboratory.doctor_laboratory_assignments (
     doctor_id       UUID NOT NULL REFERENCES authentication.users(id) ON DELETE CASCADE,
@@ -246,7 +273,8 @@ CREATE TABLE cashier.patient_import_rows (
 --    Postgres for uniqueness, these cover extra query patterns)
 -- ------------------------------------------------------------
 
-CREATE INDEX idx_patients_full_name          ON cashier.patients (full_name);
+CREATE INDEX idx_patients_last_name          ON cashier.patients (last_name);
+CREATE INDEX idx_patients_first_name         ON cashier.patients (first_name);
 CREATE INDEX idx_transactions_patient        ON cashier.transactions (patient_id);
 CREATE INDEX idx_transaction_items_txn       ON cashier.transaction_items (transaction_id);
 CREATE INDEX idx_lab_results_laboratory      ON laboratory.lab_results (laboratory_id);

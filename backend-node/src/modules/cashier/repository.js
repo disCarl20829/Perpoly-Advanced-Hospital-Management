@@ -6,29 +6,31 @@ import db from '../../config/db.js';
 
 /**
  * Create a new patient.
- * @param {object} data - { full_name, gender, birthdate, address, contact_no, source, created_by }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by }
  * @returns {object} created patient
  */
-export async function createPatient({ full_name, gender, birthdate, address, contact_no, source, created_by }) {
+export async function createPatient({ last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by }) {
     const query = `
-        INSERT INTO cashier.patients (full_name, gender, birthdate, address, contact_no, source, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO cashier.patients (last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
     `;
-    const { rows } = await db.query(query, [full_name, gender, birthdate, address, contact_no, source, created_by]);
+    const { rows } = await db.query(query, [last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by]);
     return rows[0];
 }
 
 /**
- * Find patients by name (partial match).
+ * Find patients by name (partial match on any name part).
  * @param {string} name
  * @returns {array} matching patients
  */
 export async function findPatientsByName(name) {
     const query = `
         SELECT * FROM cashier.patients
-        WHERE full_name ILIKE $1
-        ORDER BY full_name
+        WHERE last_name ILIKE $1
+           OR first_name ILIKE $1
+           OR middle_name ILIKE $1
+        ORDER BY last_name, first_name
     `;
     const { rows } = await db.query(query, [`%${name}%`]);
     return rows;
@@ -50,7 +52,7 @@ export async function findPatientById(id) {
  * @returns {array} list of patients
  */
 export async function findAllPatients() {
-    const query = `SELECT * FROM cashier.patients ORDER BY full_name`;
+    const query = `SELECT * FROM cashier.patients ORDER BY last_name, first_name`;
     const { rows } = await db.query(query);
     return rows;
 }
@@ -109,6 +111,9 @@ export async function createTransaction({ patient_id, cashier_id, status, items 
     try {
         await client.query('BEGIN');
 
+        // Ensure the receipt sequence exists (idempotent)
+        await client.query(`CREATE SEQUENCE IF NOT EXISTS cashier.receipt_seq START 1`);
+
         // Generate receipt number
         const receiptResult = await client.query(`
             SELECT 'RCPT-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || LPAD(NEXTVAL('cashier.receipt_seq')::TEXT, 6, '0') AS receipt_no
@@ -151,7 +156,7 @@ export async function createTransaction({ patient_id, cashier_id, status, items 
  */
 export async function findAllTransactions() {
     const query = `
-        SELECT t.*, p.full_name AS patient_name
+        SELECT t.*, TRIM(CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)) AS patient_name
         FROM cashier.transactions t
         JOIN cashier.patients p ON p.id = t.patient_id
         ORDER BY t.issued_at DESC
@@ -167,7 +172,7 @@ export async function findAllTransactions() {
  */
 export async function findTransactionById(id) {
     const query = `
-        SELECT t.*, p.full_name AS patient_name
+        SELECT t.*, TRIM(CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)) AS patient_name
         FROM cashier.transactions t
         JOIN cashier.patients p ON p.id = t.patient_id
         WHERE t.id = $1

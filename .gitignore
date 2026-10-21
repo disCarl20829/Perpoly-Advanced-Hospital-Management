@@ -1,3 +1,9 @@
 backend-node/node_modules/.bin/tsc --init
 backend-node/node_modules/
 backend-node/.env
+
+frontend/node_modules/.bin/tsc
+frontend/node_modules/
+
+postman/
+.postman/

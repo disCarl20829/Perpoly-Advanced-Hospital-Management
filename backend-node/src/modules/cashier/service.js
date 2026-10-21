@@ -6,7 +6,7 @@ import * as cashierRepo from './repository.js';
 
 /**
  * Create a new patient.
- * @param {object} data - { full_name, gender, birthdate, address, contact_no, created_by }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, created_by }
  * @returns {object} created patient
  */
 export async function createPatient(data) {
