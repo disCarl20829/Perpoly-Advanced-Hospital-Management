@@ -9,9 +9,10 @@ CREATE SCHEMA IF NOT EXISTS cashier;
 CREATE SCHEMA IF NOT EXISTS laboratory;
 CREATE SCHEMA IF NOT EXISTS inventory;
 CREATE SCHEMA IF NOT EXISTS accounting;
+CREATE SCHEMA IF NOT EXISTS income;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA authentication;
-SET search_path TO authentication, cashier, laboratory, inventory, accounting;
+SET search_path TO authentication, cashier, laboratory, inventory, accounting, income;
 
 -- ------------------------------------------------------------
 -- ENUM TYPES (created in the schema that owns the concept)
@@ -23,6 +24,7 @@ CREATE TYPE cashier.patient_source     AS ENUM ('manual', 'imported');
 CREATE TYPE cashier.transaction_status AS ENUM ('paid', 'unpaid');
 CREATE TYPE cashier.import_source      AS ENUM ('excel', 'ocr_scan');
 CREATE TYPE cashier.import_row_status  AS ENUM ('new', 'duplicate_flagged', 'imported');
+CREATE TYPE cashier.mode_of_payment     AS ENUM ('cash', 'paymaya', 'gotyme', 'gcash', 'credit_card', 'debit_card', 'bank_transfer');
 
 CREATE TYPE laboratory.result_status   AS ENUM ('pending', 'completed');
 
@@ -110,6 +112,7 @@ CREATE TABLE cashier.transactions (
     cashier_id      UUID NOT NULL REFERENCES authentication.users(id),
     status          cashier.transaction_status NOT NULL DEFAULT 'unpaid',
     total_amount    NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+    mode_of_payment cashier.mode_of_payment NOT NULL DEFAULT 'cash',
     issued_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -269,7 +272,93 @@ CREATE TABLE cashier.patient_import_rows (
 
 
 -- ------------------------------------------------------------
--- 8. INDEXES (common lookups — PKs/FKs are already indexed by
+-- 8. INCOME (auto-synced from cashier transactions)
+--
+-- Every cashier transaction is mirrored here by a trigger. Rows are
+-- created/updated automatically — the API never writes to this table.
+-- `status` mirrors the transaction (paid / unpaid) so reports can filter.
+-- ------------------------------------------------------------
+
+CREATE TABLE income.income_records (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id      UUID NOT NULL UNIQUE REFERENCES cashier.transactions(id) ON DELETE CASCADE,
+    receipt_no          TEXT NOT NULL,
+    patient_id          UUID REFERENCES cashier.patients(id) ON DELETE SET NULL,
+    patient_name        TEXT,                          -- snapshot at time of sale
+    cashier_id          UUID REFERENCES authentication.users(id) ON DELETE SET NULL,
+    cashier_name        TEXT,                          -- snapshot at time of sale
+    amount              NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+    mode_of_payment     cashier.mode_of_payment NOT NULL DEFAULT 'cash',
+    status              cashier.transaction_status NOT NULL,
+    issued_at           TIMESTAMPTZ NOT NULL,          -- when the sale happened
+    recorded_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Keep income_records in sync with cashier.transactions.
+CREATE OR REPLACE FUNCTION income.sync_income_record()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_patient_name TEXT;
+    v_cashier_name TEXT;
+BEGIN
+    SELECT TRIM(CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name))
+      INTO v_patient_name
+      FROM cashier.patients p
+     WHERE p.id = NEW.patient_id;
+
+    SELECT TRIM(CONCAT_WS(' ', u.first_name, u.middle_name, u.last_name))
+      INTO v_cashier_name
+      FROM authentication.users u
+     WHERE u.id = NEW.cashier_id;
+
+    INSERT INTO income.income_records (
+        transaction_id, receipt_no, patient_id, patient_name,
+        cashier_id, cashier_name, amount, mode_of_payment, status, issued_at
+    ) VALUES (
+        NEW.id, NEW.receipt_no, NEW.patient_id, v_patient_name,
+        NEW.cashier_id, v_cashier_name, NEW.total_amount, NEW.mode_of_payment, NEW.status, NEW.issued_at
+    )
+    ON CONFLICT (transaction_id) DO UPDATE SET
+        receipt_no      = EXCLUDED.receipt_no,
+        patient_id      = EXCLUDED.patient_id,
+        patient_name    = EXCLUDED.patient_name,
+        cashier_id      = EXCLUDED.cashier_id,
+        cashier_name    = EXCLUDED.cashier_name,
+        amount          = EXCLUDED.amount,
+        mode_of_payment = EXCLUDED.mode_of_payment,
+        status          = EXCLUDED.status,
+        issued_at       = EXCLUDED.issued_at,
+        updated_at      = now();
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_cashier_transactions_income
+AFTER INSERT OR UPDATE
+ON cashier.transactions
+FOR EACH ROW EXECUTE FUNCTION income.sync_income_record();
+
+-- Backfill transactions that existed before this module was added.
+INSERT INTO income.income_records (
+    transaction_id, receipt_no, patient_id, patient_name,
+    cashier_id, cashier_name, amount, mode_of_payment, status, issued_at
+)
+SELECT
+    t.id, t.receipt_no, t.patient_id,
+    TRIM(CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)),
+    t.cashier_id,
+    TRIM(CONCAT_WS(' ', u.first_name, u.middle_name, u.last_name)),
+    t.total_amount, t.mode_of_payment, t.status, t.issued_at
+FROM cashier.transactions t
+LEFT JOIN cashier.patients p ON p.id = t.patient_id
+LEFT JOIN authentication.users u ON u.id = t.cashier_id
+ON CONFLICT (transaction_id) DO NOTHING;
+
+
+-- ------------------------------------------------------------
+-- 9. INDEXES (common lookups — PKs/FKs are already indexed by
 --    Postgres for uniqueness, these cover extra query patterns)
 -- ------------------------------------------------------------
 
@@ -281,3 +370,6 @@ CREATE INDEX idx_lab_results_laboratory      ON laboratory.lab_results (laborato
 CREATE INDEX idx_lab_results_doctor          ON laboratory.lab_results (doctor_id);
 CREATE INDEX idx_stock_movements_material    ON inventory.stock_movements (material_id);
 CREATE INDEX idx_expenses_source             ON accounting.expenses (source_system, source_reference_id);
+CREATE INDEX idx_income_issued_at            ON income.income_records (issued_at);
+CREATE INDEX idx_income_status               ON income.income_records (status);
+CREATE INDEX idx_income_mode_of_payment      ON income.income_records (mode_of_payment);

@@ -7,3 +7,5 @@ frontend/node_modules/
 
 postman/
 .postman/
+
+income_migration.sql

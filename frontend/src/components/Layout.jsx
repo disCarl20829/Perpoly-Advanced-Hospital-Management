@@ -4,6 +4,7 @@ import Cashier from '../pages/Cashier.jsx';
 import Laboratory from '../pages/Laboratory.jsx';
 import Inventory from '../pages/Inventory.jsx';
 import Accounting from '../pages/Accounting.jsx';
+import Income from '../pages/Income.jsx';
 import Users from '../pages/Users.jsx';
 
 const NAV = [
@@ -11,6 +12,7 @@ const NAV = [
     { key: 'laboratory', label: 'Laboratory', icon: '🧪', roles: ['doctor', 'lab_tech', 'superadmin'] },
     { key: 'inventory', label: 'Inventory', icon: '📦', roles: ['inventory_staff', 'superadmin'] },
     { key: 'accounting', label: 'Accounting', icon: '📊', roles: ['accountant', 'superadmin'] },
+    { key: 'income', label: 'Income', icon: '💵', roles: null },
     { key: 'users', label: 'Users', icon: '👥', roles: ['superadmin'] }
 ];
 
@@ -18,7 +20,7 @@ export default function Layout() {
     const { user, logout } = useAuth();
     const [view, setView] = useState(null);
 
-    const allowed = NAV.filter((n) => n.roles.some((r) => user.roles.includes(r)));
+    const allowed = NAV.filter((n) => !n.roles || n.roles.some((r) => user.roles.includes(r)));
     const active = view || allowed[0]?.key;
     const title = NAV.find((n) => n.key === active)?.label || 'Dashboard';
 
@@ -32,6 +34,8 @@ export default function Layout() {
                 return <Inventory />;
             case 'accounting':
                 return <Accounting />;
+            case 'income':
+                return <Income />;
             case 'users':
                 return <Users />;
             default:
