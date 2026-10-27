@@ -36,7 +36,8 @@ export async function getIncomeSummary(req, res, next) {
 }
 
 /**
- * Download an Excel workbook (Summary + Details).
+ * Download the client-format Excel workbook.
+ * Daily = one sheet. Weekly/monthly = one sheet per day + Summary.
  */
 export async function exportIncome(req, res, next) {
     try {
@@ -45,13 +46,17 @@ export async function exportIncome(req, res, next) {
         validateFilters(req.query);
 
         const { status, mode_of_payment, from, to } = req.query;
-        const buffer = await incomeService.generateIncomeExcel(period, { status, mode_of_payment, from, to });
+        const report = await incomeService.generateIncomeExcel(period, { status, mode_of_payment, from, to });
 
-        const stamp = new Date().toISOString().slice(0, 10);
+        const fileName = report.from === report.to
+            ? `daily-sales-report-${report.from}.xlsx`
+            : `sales-report-${report.from}_to_${report.to}.xlsx`;
+
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="income-${period}-${stamp}.xlsx"`);
-        res.setHeader('Content-Length', buffer.length);
-        res.send(buffer);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        res.setHeader('Content-Length', report.buffer.length);
+        res.send(report.buffer);
     } catch (err) {
         next(err);
     }

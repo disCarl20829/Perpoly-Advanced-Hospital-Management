@@ -92,7 +92,11 @@ export default function Income() {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `income-${period}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const nameMatch = disposition.match(/filename="?([^"]+)"?/i);
+            link.download = nameMatch ? nameMatch[1] : 'sales-report.xlsx';
+
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -194,6 +198,11 @@ export default function Income() {
                         </button>
                     </div>
                 </div>
+
+                <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+                    One sheet per day. Weekly/monthly exports also include a Summary sheet and an Other Tests sheet.
+                    Blank dates default to: Daily = today, Weekly = this week, Monthly = this month (Asia/Manila).
+                </p>
             </div>
 
             <div className="grid cols-2">
@@ -280,7 +289,10 @@ export default function Income() {
                                 <tr key={r.id}>
                                     <td>{r.receipt_no}</td>
                                     <td>{r.issued_at_local}</td>
-                                    <td>{r.patient_name || '—'}</td>
+                                    <td>
+                                        {r.patient_name || '—'}
+                                        {r.is_senior && <span className="badge blue" style={{ marginLeft: 6 }}>Senior</span>}
+                                    </td>
                                     <td>{r.cashier_name || '—'}</td>
                                     <td>{titleCase(r.mode_of_payment)}</td>
                                     <td>
@@ -288,7 +300,14 @@ export default function Income() {
                                             {titleCase(r.status)}
                                         </span>
                                     </td>
-                                    <td>{peso(r.amount)}</td>
+                                    <td>
+                                        {peso(r.amount)}
+                                        {Number(r.discount_amount) > 0 && (
+                                            <div className="muted" style={{ fontSize: 11 }}>
+                                                -{peso(r.discount_amount)} senior
+                                            </div>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

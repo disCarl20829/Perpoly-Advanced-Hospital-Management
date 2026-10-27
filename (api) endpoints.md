@@ -88,21 +88,21 @@ Access: **cashier** or **superadmin** for every route.
 
 | Method | Path | Body / Query |
 |--------|------|--------------|
-| `POST` | `/cashier/patients` | `{ last_name, first_name, middle_name?, extra_name?, gender?, birthdate?, address?, contact_no? }` |
+| `POST` | `/cashier/patients` | `{ last_name, first_name, middle_name?, extra_name?, gender?, birthdate?, address?, contact_no?, is_senior? }` |
 | `GET` | `/cashier/patients/search` | `?name=<text>` |
 | `GET` | `/cashier/patients` | List all |
 | `GET` | `/cashier/patients/:id` | Single patient |
-| `PUT` | `/cashier/patients/:id` | Editable patient fields |
+| `PUT` | `/cashier/patients/:id` | Partial: editable patient fields, including `is_senior` |
 | `DELETE` | `/cashier/patients/:id` | Delete patient |
 
 ### Transaction types
 
 | Method | Path | Body |
 |--------|------|------|
-| `POST` | `/cashier/transaction-types` | `{ name, category }` |
-| `GET` | `/cashier/transaction-types` | List all |
+| `POST` | `/cashier/transaction-types` | `{ name, category, default_price?, notes?, is_active? }` |
+| `GET` | `/cashier/transaction-types` | List all; optional `?active=true\|false&category=<name>` |
 | `GET` | `/cashier/transaction-types/:id` | Single |
-| `PUT` | `/cashier/transaction-types/:id` | `{ name, category }` |
+| `PUT` | `/cashier/transaction-types/:id` | Partial: `{ name?, category?, default_price?, notes?, is_active? }` |
 | `DELETE` | `/cashier/transaction-types/:id` | Delete |
 
 ### Transactions
@@ -124,6 +124,49 @@ Access: **cashier** or **superadmin** for every route.
 
 Adding, updating, or removing an item recalculates `transactions.total_amount`
 and automatically updates the matching **income** record.
+
+Transaction responses include `subtotal`, `discount_rate`, `discount_amount`,
+`total_amount` (net after discount), and `is_senior`. The discount is applied
+server-side when the patient is marked as a senior citizen.
+
+---
+
+## Settings — `/settings`
+
+Access: **superadmin**, **cashier**, **lab_tech**, **accountant**
+(everyone except `doctor` and `inventory_staff`).
+
+### Cashier settings
+
+| Method | Path | Body / Notes |
+|--------|------|--------------|
+| `GET` | `/settings/senior-discount` | Returns `{ seniorDiscountRate }` |
+| `PUT` | `/settings/senior-discount` | `{ senior_discount_rate: 0..100 }` — applies to **new** senior transactions; existing transactions keep their original rate |
+
+### Departments
+
+| Method | Path | Body / Notes |
+|--------|------|--------------|
+| `GET` | `/settings/departments` | List departments with active/total test counts |
+| `POST` | `/settings/departments` | `{ name, is_active? }` |
+| `PUT` | `/settings/departments/:id` | `{ name?, is_active? }` |
+| `DELETE` | `/settings/departments/:id` | Deletes when unused; otherwise deactivates |
+
+Renaming a department cascades to `transaction_types.category`, so laboratory
+routing keeps working. Deactivating a department also deactivates its tests.
+
+### Examinations (tests)
+
+| Method | Path | Body / Notes |
+|--------|------|--------------|
+| `GET` | `/settings/tests` | Optional `?active=true\|false&category=<name>&search=<text>` |
+| `POST` | `/settings/tests` | `{ name, category, default_price?, notes?, is_active? }` |
+| `PUT` | `/settings/tests/:id` | Partial: `{ name?, category?, default_price?, notes?, is_active? }` |
+| `DELETE` | `/settings/tests/:id` | Deletes when unused; otherwise deactivates |
+
+`default_price` is the cashier's pre-filled price; the cashier can still edit the
+unit price on a transaction. Tests with `notes = "Send-out test (charge varies)"`
+start at `₱0.00` so the cashier can enter the actual amount.
 
 ---
 
@@ -197,7 +240,19 @@ Access: **any authenticated user**.
 |--------|------|---------------|
 | `GET` | `/income` | `?status=paid\|unpaid&mode_of_payment=<mode>&from=YYYY-MM-DD&to=YYYY-MM-DD` |
 | `GET` | `/income/summary` | `?period=daily\|weekly\|monthly&status=&mode_of_payment=&from=&to=` |
-| `GET` | `/income/export` | Same filters as `/income/summary`; returns an `.xlsx` file |
+| `GET` | `/income/export` | Same filters as `/income/summary`; returns the client-format `.xlsx` workbook |
+
+`/income/export` produces:
+
+- **Daily** — one worksheet in the client layout.
+- **Weekly / monthly** — one worksheet per day with sales, plus a **Summary**
+  worksheet and an **Other Tests** worksheet.
+
+Blank dates default to **Asia/Manila** today for daily, the current Monday–today
+week for weekly, and the first of the current month–today for monthly.
+
+Income records include `subtotal`, `discount_rate`, `discount_amount`, and
+`is_senior` in addition to `amount` (the net amount after discount).
 
 ### `GET /income/summary` response
 

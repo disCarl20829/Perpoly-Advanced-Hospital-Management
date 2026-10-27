@@ -1,21 +1,41 @@
 import db from '../../config/db.js';
 
 // ============================================================
+// HELPERS
+// ============================================================
+
+function roundMoney(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Read the configured senior discount percentage.
+ * @param {object} client - pg pool or transaction client
+ * @returns {number} 0..100
+ */
+async function getSeniorDiscountRate(client = db) {
+    const { rows } = await client.query(
+        `SELECT senior_discount_rate FROM cashier.settings WHERE id = TRUE`
+    );
+    return Number(rows[0]?.senior_discount_rate ?? 20);
+}
+
+// ============================================================
 // PATIENTS
 // ============================================================
 
 /**
  * Create a new patient.
- * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior, source, created_by }
  * @returns {object} created patient
  */
-export async function createPatient({ last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by }) {
+export async function createPatient({ last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior = false, source, created_by }) {
     const query = `
-        INSERT INTO cashier.patients (last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO cashier.patients (last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior, source, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
     `;
-    const { rows } = await db.query(query, [last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, source, created_by]);
+    const { rows } = await db.query(query, [last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior, source, created_by]);
     return rows[0];
 }
 
@@ -58,19 +78,34 @@ export async function findAllPatients() {
 }
 
 /**
- * Update a patient by ID.
+ * Update a patient by ID. Only provided fields are changed.
  * @param {string} id - UUID
- * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior }
  * @returns {object|null} updated patient
  */
-export async function updatePatient(id, { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no }) {
+export async function updatePatient(id, data = {}) {
+    const fields = [];
+    const params = [];
+
+    for (const key of ['last_name', 'first_name', 'middle_name', 'extra_name', 'gender', 'birthdate', 'address', 'contact_no', 'is_senior']) {
+        if (data[key] !== undefined) {
+            params.push(data[key]);
+            fields.push(`${key} = $${params.length}`);
+        }
+    }
+
+    if (fields.length === 0) {
+        return await findPatientById(id);
+    }
+
+    params.push(id);
     const query = `
         UPDATE cashier.patients
-        SET last_name = $1, first_name = $2, middle_name = $3, extra_name = $4, gender = $5, birthdate = $6, address = $7, contact_no = $8
-        WHERE id = $9
+        SET ${fields.join(', ')}
+        WHERE id = $${params.length}
         RETURNING *
     `;
-    const { rows } = await db.query(query, [last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, id]);
+    const { rows } = await db.query(query, params);
     return rows[0] || null;
 }
 
@@ -91,26 +126,44 @@ export async function deletePatient(id) {
 
 /**
  * Create a new transaction type.
- * @param {object} data - { name, category }
+ * @param {object} data - { name, category, default_price, notes, is_active }
  * @returns {object} created transaction type
  */
-export async function createTransactionType({ name, category }) {
+export async function createTransactionType({ name, category, default_price = 0, notes = null, is_active = true }) {
     const query = `
-        INSERT INTO cashier.transaction_types (name, category)
-        VALUES ($1, $2)
+        INSERT INTO cashier.transaction_types (name, category, default_price, notes, is_active)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     `;
-    const { rows } = await db.query(query, [name, category]);
+    const { rows } = await db.query(query, [name, category, default_price, notes, is_active]);
     return rows[0];
 }
 
 /**
  * Find all transaction types.
+ * @param {object} filters - { active, category }
  * @returns {array} list of transaction types
  */
-export async function findAllTransactionTypes() {
-    const query = `SELECT * FROM cashier.transaction_types ORDER BY name`;
-    const { rows } = await db.query(query);
+export async function findAllTransactionTypes(filters = {}) {
+    const clauses = [];
+    const params = [];
+
+    if (filters.active !== undefined) {
+        params.push(filters.active);
+        clauses.push(`is_active = $${params.length}`);
+    }
+    if (filters.category) {
+        params.push(filters.category);
+        clauses.push(`category = $${params.length}`);
+    }
+
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const query = `
+        SELECT * FROM cashier.transaction_types
+        ${where}
+        ORDER BY category, name
+    `;
+    const { rows } = await db.query(query, params);
     return rows;
 }
 
@@ -126,14 +179,34 @@ export async function findTransactionTypeById(id) {
 }
 
 /**
- * Update a transaction type by ID.
+ * Update a transaction type by ID. Only provided fields are changed.
  * @param {string} id - UUID
- * @param {object} data - { name, category }
+ * @param {object} data - { name, category, default_price, notes, is_active }
  * @returns {object|null}
  */
-export async function updateTransactionType(id, { name, category }) {
-    const query = 'UPDATE cashier.transaction_types SET name = $1, category = $2 WHERE id = $3 RETURNING *';
-    const { rows } = await db.query(query, [name, category, id]);
+export async function updateTransactionType(id, data = {}) {
+    const fields = [];
+    const params = [];
+
+    for (const key of ['name', 'category', 'default_price', 'notes', 'is_active']) {
+        if (data[key] !== undefined) {
+            params.push(data[key]);
+            fields.push(`${key} = $${params.length}`);
+        }
+    }
+
+    if (fields.length === 0) {
+        return await findTransactionTypeById(id);
+    }
+
+    params.push(id);
+    const query = `
+        UPDATE cashier.transaction_types
+        SET ${fields.join(', ')}
+        WHERE id = $${params.length}
+        RETURNING *
+    `;
+    const { rows } = await db.query(query, params);
     return rows[0] || null;
 }
 
@@ -171,24 +244,49 @@ export async function createTransaction({ patient_id, cashier_id, status, mode_o
         `);
         const receipt_no = receiptResult.rows[0].receipt_no;
 
-        // Calculate total
-        const total = items.reduce((sum, item) => sum + (item.unit_price * item.qty), 0);
+        // Senior status is snapshotted onto the transaction so historical
+        // reports do not change if the patient record is edited later.
+        const patientResult = await client.query(
+            `SELECT is_senior FROM cashier.patients WHERE id = $1`,
+            [patient_id]
+        );
+        if (!patientResult.rows[0]) {
+            const err = new Error('Patient not found');
+            err.status = 404;
+            throw err;
+        }
+
+        const isSenior = patientResult.rows[0].is_senior === true;
+        const discountRate = isSenior ? await getSeniorDiscountRate(client) : 0;
+
+        const subtotal = roundMoney(
+            items.reduce((sum, item) => sum + (Number(item.unit_price) * Number(item.qty)), 0)
+        );
+        const discountAmount = roundMoney(subtotal * discountRate / 100);
+        const total = roundMoney(subtotal - discountAmount);
 
         // Insert transaction
         const txnResult = await client.query(`
-            INSERT INTO cashier.transactions (receipt_no, patient_id, cashier_id, status, mode_of_payment, total_amount)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO cashier.transactions (
+                receipt_no, patient_id, cashier_id, status, mode_of_payment,
+                subtotal, discount_rate, discount_amount, total_amount, is_senior
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
-        `, [receipt_no, patient_id, cashier_id, status, mode_of_payment, total]);
+        `, [
+            receipt_no, patient_id, cashier_id, status, mode_of_payment,
+            subtotal, discountRate, discountAmount, total, isSenior
+        ]);
 
         const transaction = txnResult.rows[0];
 
         // Insert items
         for (const item of items) {
+            const amount = roundMoney(Number(item.unit_price) * Number(item.qty));
             await client.query(`
                 INSERT INTO cashier.transaction_items (transaction_id, transaction_type_id, qty, unit, description, unit_price, amount)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-            `, [transaction.id, item.transaction_type_id, item.qty, item.unit, item.description, item.unit_price, item.unit_price * item.qty]);
+            `, [transaction.id, item.transaction_type_id, item.qty, item.unit, item.description, item.unit_price, amount]);
         }
 
         await client.query('COMMIT');
@@ -338,17 +436,37 @@ export async function findTransactionItem(transactionId, itemId) {
  * @returns {object|null} updated transaction
  */
 async function recalcTransactionTotal(client, transactionId) {
+    const current = await client.query(
+        `SELECT is_senior, discount_rate FROM cashier.transactions WHERE id = $1 FOR UPDATE`,
+        [transactionId]
+    );
+    if (!current.rows[0]) return null;
+
+    const isSenior = current.rows[0].is_senior === true;
+    const discountRate = isSenior ? Number(current.rows[0].discount_rate || 0) : 0;
+
+    const subtotalResult = await client.query(`
+        SELECT COALESCE(SUM(qty * unit_price), 0) AS subtotal
+        FROM cashier.transaction_items
+        WHERE transaction_id = $1
+    `, [transactionId]);
+
+    const subtotal = roundMoney(subtotalResult.rows[0].subtotal);
+    const discountAmount = roundMoney(subtotal * discountRate / 100);
+    const total = roundMoney(subtotal - discountAmount);
+
     const query = `
         UPDATE cashier.transactions
-        SET total_amount = COALESCE((
-            SELECT SUM(qty * unit_price)
-            FROM cashier.transaction_items
-            WHERE transaction_id = $1
-        ), 0)
+        SET subtotal = $2,
+            discount_rate = $3,
+            discount_amount = $4,
+            total_amount = $5
         WHERE id = $1
         RETURNING *
     `;
-    const { rows } = await client.query(query, [transactionId]);
+    const { rows } = await client.query(query, [
+        transactionId, subtotal, discountRate, discountAmount, total
+    ]);
     return rows[0] || null;
 }
 

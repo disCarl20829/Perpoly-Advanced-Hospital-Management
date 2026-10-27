@@ -131,3 +131,64 @@ export async function getIncomeByMode(filters = {}) {
     const { rows } = await db.query(query, params);
     return rows;
 }
+
+// ============================================================
+// SALES REPORT (client Excel template)
+// ============================================================
+
+/**
+ * Find paid/unpaid transactions and their items for the client-format
+ * daily sales report. One row per item; the service groups them.
+ * @param {object} filters - { status, mode_of_payment, from, to }
+ * @returns {array} transaction/item rows
+ */
+export async function findSalesReportTransactions({ status, mode_of_payment, from, to }) {
+    const clauses = [
+        `(t.issued_at AT TIME ZONE 'Asia/Manila')::date BETWEEN $1::date AND $2::date`
+    ];
+    const params = [from, to];
+
+    if (status) {
+        params.push(status);
+        clauses.push(`t.status = $${params.length}`);
+    }
+    if (mode_of_payment) {
+        params.push(mode_of_payment);
+        clauses.push(`t.mode_of_payment = $${params.length}`);
+    }
+
+    const query = `
+        SELECT
+            t.id,
+            t.receipt_no,
+            t.issued_at,
+            t.status,
+            t.mode_of_payment,
+            t.subtotal,
+            t.discount_rate,
+            t.discount_amount,
+            t.total_amount,
+            t.is_senior,
+            TO_CHAR(t.issued_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS local_date,
+            p.last_name,
+            p.first_name,
+            p.middle_name,
+            p.extra_name,
+            ti.id AS item_id,
+            ti.qty,
+            ti.unit_price,
+            ti.amount,
+            ti.description,
+            tt.name AS type_name,
+            tt.category
+        FROM cashier.transactions t
+        JOIN cashier.patients p ON p.id = t.patient_id
+        LEFT JOIN cashier.transaction_items ti ON ti.transaction_id = t.id
+        LEFT JOIN cashier.transaction_types tt ON tt.id = ti.transaction_type_id
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY local_date, t.issued_at, t.receipt_no, ti.id
+    `;
+
+    const { rows } = await db.query(query, params);
+    return rows;
+}

@@ -6,7 +6,7 @@ import * as cashierRepo from './repository.js';
 
 /**
  * Create a new patient.
- * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, created_by }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior, created_by }
  * @returns {object} created patient
  */
 export async function createPatient(data) {
@@ -56,7 +56,7 @@ export async function getPatientById(id) {
 /**
  * Update a patient by ID.
  * @param {string} id - UUID
- * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no }
+ * @param {object} data - { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior }
  * @returns {object} updated patient
  */
 export async function updatePatient(id, data) {
@@ -90,7 +90,7 @@ export async function deletePatient(id) {
 
 /**
  * Create a new transaction type.
- * @param {object} data - { name, category }
+ * @param {object} data - { name, category, default_price, notes, is_active }
  * @returns {object} created transaction type
  */
 export async function createTransactionType(data) {
@@ -99,10 +99,11 @@ export async function createTransactionType(data) {
 
 /**
  * Get all transaction types.
+ * @param {object} filters - { active, category }
  * @returns {array} list of transaction types
  */
-export async function getAllTransactionTypes() {
-    return await cashierRepo.findAllTransactionTypes();
+export async function getAllTransactionTypes(filters = {}) {
+    return await cashierRepo.findAllTransactionTypes(filters);
 }
 
 /**
@@ -123,16 +124,17 @@ export async function getTransactionTypeById(id) {
 /**
  * Update a transaction type by ID.
  * @param {string} id - UUID
+ * @param {object} data - { name, category, default_price, notes, is_active }
  * @returns {object}
  */
-export async function updateTransactionType(id) {
+export async function updateTransactionType(id, data = {}) {
     const transactionType = await cashierRepo.findTransactionTypeById(id);
     if (!transactionType) {
         const err = new Error('Transaction type not found');
         err.status = 404;
         throw err;
     }
-    return await cashierRepo.updateTransactionType(id);
+    return await cashierRepo.updateTransactionType(id, data);
 }
 
 /**

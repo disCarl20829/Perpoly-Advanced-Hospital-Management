@@ -5,6 +5,7 @@ import Laboratory from '../pages/Laboratory.jsx';
 import Inventory from '../pages/Inventory.jsx';
 import Accounting from '../pages/Accounting.jsx';
 import Income from '../pages/Income.jsx';
+import Settings from '../pages/Settings.jsx';
 import Users from '../pages/Users.jsx';
 
 const NAV = [
@@ -13,6 +14,7 @@ const NAV = [
     { key: 'inventory', label: 'Inventory', icon: '📦', roles: ['inventory_staff', 'superadmin'] },
     { key: 'accounting', label: 'Accounting', icon: '📊', roles: ['accountant', 'superadmin'] },
     { key: 'income', label: 'Income', icon: '💵', roles: null },
+    { key: 'settings', label: 'Settings', icon: '⚙️', roles: ['cashier', 'lab_tech', 'accountant', 'superadmin'] },
     { key: 'users', label: 'Users', icon: '👥', roles: ['superadmin'] }
 ];
 
@@ -36,6 +38,8 @@ export default function Layout() {
                 return <Accounting />;
             case 'income':
                 return <Income />;
+            case 'settings':
+                return <Settings />;
             case 'users':
                 return <Users />;
             default:

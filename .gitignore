@@ -9,3 +9,8 @@ postman/
 .postman/
 
 income_migration.sql
+price_list_migration.sql
+senior_discount_migration.sql
+
+formattable
+price_list

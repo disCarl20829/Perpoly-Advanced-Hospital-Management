@@ -9,7 +9,8 @@ const EMPTY_PATIENT = {
     gender: '',
     birthdate: '',
     address: '',
-    contact_no: ''
+    contact_no: '',
+    is_senior: false
 };
 
 const patientName = (p) =>
@@ -28,6 +29,74 @@ const MODE_OPTIONS = [
 const MODE_LABEL = Object.fromEntries(MODE_OPTIONS.map((m) => [m.value, m.label]));
 
 const lineTotal = (item) => Number(item.unit_price) * Number(item.qty);
+const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+function ServicePicker({ types, departments, onPick }) {
+    const [department, setDepartment] = useState('All');
+    const [query, setQuery] = useState('');
+
+    const activeDepartments = departments.filter((d) => d.is_active);
+
+    const filtered = types.filter((t) => {
+        const matchesDepartment = department === 'All' || t.category === department;
+        const matchesQuery = !query || t.name.toLowerCase().includes(query.trim().toLowerCase());
+        return matchesDepartment && matchesQuery;
+    });
+
+    return (
+        <div className="service-picker">
+            <input
+                placeholder="Search examinations…"
+                value={query}
+                onChange={(e) => {
+                    setQuery(e.target.value);
+                    if (e.target.value.trim()) setDepartment('All');
+                }}
+            />
+
+            <div className="service-tabs">
+                <button
+                    type="button"
+                    className={department === 'All' ? 'active' : ''}
+                    onClick={() => setDepartment('All')}
+                >
+                    All
+                </button>
+                {activeDepartments.map((d) => (
+                    <button
+                        key={d.id}
+                        type="button"
+                        className={department === d.name ? 'active' : ''}
+                        onClick={() => setDepartment(d.name)}
+                    >
+                        {d.name}
+                    </button>
+                ))}
+            </div>
+
+            <div className="service-buttons">
+                {filtered.length === 0 ? (
+                    <div className="empty">No examinations found.</div>
+                ) : (
+                    filtered.map((t) => (
+                        <button
+                            key={t.id}
+                            type="button"
+                            className="service-btn"
+                            title={t.notes || ''}
+                            onClick={() => onPick(t)}
+                        >
+                            <span className="service-name">{t.name}</span>
+                            <span className={`service-price ${t.notes ? 'note' : ''}`}>
+                                {t.notes ? t.notes : `₱${Number(t.default_price || 0).toFixed(2)}`}
+                            </span>
+                        </button>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+}
 
 export default function Cashier() {
     const [search, setSearch] = useState('');
@@ -36,10 +105,12 @@ export default function Cashier() {
     const [selectedPatient, setSelectedPatient] = useState(null);
 
     const [types, setTypes] = useState([]);
+    const [departments, setDepartments] = useState([]);
     const [items, setItems] = useState([]);
     const [status, setStatus] = useState('unpaid');
     const [mode, setMode] = useState('cash');
     const [transactions, setTransactions] = useState([]);
+    const [seniorRate, setSeniorRate] = useState(20);
 
     // Edit panel state
     const [editing, setEditing] = useState(null);
@@ -53,13 +124,35 @@ export default function Cashier() {
 
     useEffect(() => {
         loadTypes();
+        loadDepartments();
         loadTransactions();
+        loadSeniorRate();
     }, []);
+
+    const loadSeniorRate = async () => {
+        try {
+            const d = await api.get('/settings/senior-discount');
+            setSeniorRate(Number(d.seniorDiscountRate ?? 20));
+        } catch {
+            // The backend still applies the correct rate when the transaction
+            // is created; this preview can safely fall back to 20%.
+            setSeniorRate(20);
+        }
+    };
 
     const loadTypes = async () => {
         try {
-            const d = await api.get('/cashier/transaction-types');
+            const d = await api.get('/cashier/transaction-types?active=true');
             setTypes(d.transactionTypes);
+        } catch (e) {
+            setErr(e.message);
+        }
+    };
+
+    const loadDepartments = async () => {
+        try {
+            const d = await api.get('/laboratory/laboratories');
+            setDepartments(d.laboratories);
         } catch (e) {
             setErr(e.message);
         }
@@ -98,6 +191,7 @@ export default function Cashier() {
     };
 
     const addItem = (type) => {
+        if (!type) return;
         setItems((prev) => {
             const found = prev.find((i) => i.transaction_type_id === type.id);
             if (found) {
@@ -105,7 +199,16 @@ export default function Cashier() {
                     i.transaction_type_id === type.id ? { ...i, qty: i.qty + 1 } : i
                 );
             }
-            return [...prev, { transaction_type_id: type.id, name: type.name, qty: 1, unit_price: 0 }];
+            return [
+                ...prev,
+                {
+                    transaction_type_id: type.id,
+                    name: type.name,
+                    notes: type.notes || '',
+                    qty: 1,
+                    unit_price: Number(type.default_price || 0)
+                }
+            ];
         });
     };
 
@@ -120,6 +223,10 @@ export default function Cashier() {
     const removeItem = (id) => setItems((prev) => prev.filter((i) => i.transaction_type_id !== id));
 
     const total = items.reduce((s, i) => s + i.unit_price * i.qty, 0);
+    const seniorDiscount = selectedPatient?.is_senior
+        ? roundMoney(total * Number(seniorRate) / 100)
+        : 0;
+    const netTotal = roundMoney(total - seniorDiscount);
 
     const submitTransaction = async () => {
         setErr('');
@@ -145,7 +252,11 @@ export default function Cashier() {
                 }))
             };
             const d = await api.post('/cashier/transactions', payload);
-            setMsg(`Receipt ${d.transaction.receipt_no} created.`);
+            const created = d.transaction;
+            const discountNote = created.is_senior && Number(created.discount_amount) > 0
+                ? ` Senior discount ₱${Number(created.discount_amount).toFixed(2)} applied.`
+                : '';
+            setMsg(`Receipt ${created.receipt_no} created.${discountNote}`);
             setItems([]);
             setMode('cash');
             loadTransactions();
@@ -156,7 +267,12 @@ export default function Cashier() {
         }
     };
 
-    const editTotal = editItems.reduce((s, i) => s + lineTotal(i), 0);
+    const editSubtotal = editItems.reduce((s, i) => s + lineTotal(i), 0);
+    const editDiscountRate = Number(editing?.discount_rate || 0);
+    const editDiscount = editing?.is_senior
+        ? roundMoney(editSubtotal * editDiscountRate / 100)
+        : 0;
+    const editNet = roundMoney(editSubtotal - editDiscount);
 
     const openEditor = async (id) => {
         setErr('');
@@ -195,8 +311,9 @@ export default function Cashier() {
                 key: `${type.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 transaction_type_id: type.id,
                 name: type.name,
+                notes: type.notes || '',
                 qty: 1,
-                unit_price: 0
+                unit_price: Number(type.default_price || 0)
             }
         ]);
     };
@@ -339,7 +456,10 @@ export default function Cashier() {
                             <tbody>
                                 {patients.map((p) => (
                                     <tr key={p.id}>
-                                        <td>{patientName(p)}</td>
+                                        <td>
+                                            {patientName(p)}
+                                            {p.is_senior && <span className="badge blue" style={{ marginLeft: 6 }}>Senior</span>}
+                                        </td>
                                         <td>{p.gender || '—'}</td>
                                         <td>{p.contact_no || '—'}</td>
                                         <td>
@@ -359,6 +479,11 @@ export default function Cashier() {
                     {selectedPatient && (
                         <div className="alert success" style={{ marginTop: 12 }}>
                             Selected: <strong>{patientName(selectedPatient)}</strong>
+                            {selectedPatient.is_senior && (
+                                <div className="muted" style={{ marginTop: 4 }}>
+                                    Senior citizen — {Number(seniorRate).toFixed(2)}% discount will be applied.
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -436,6 +561,18 @@ export default function Cashier() {
                             onChange={(e) => setPatientForm({ ...patientForm, contact_no: e.target.value })}
                         />
                     </div>
+                    <label
+                        className="muted"
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 14 }}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={patientForm.is_senior}
+                            onChange={(e) => setPatientForm({ ...patientForm, is_senior: e.target.checked })}
+                            style={{ width: 'auto' }}
+                        />
+                        Senior citizen (discount applies)
+                    </label>
                     <button className="btn" onClick={createPatient}>
                         Create Patient
                     </button>
@@ -448,43 +585,33 @@ export default function Cashier() {
                     <span className="dot" /> New Transaction
                 </h2>
 
-                <div className="grid cols-2">
-                    <div>
-                        <div className="field">
-                            <label>Patient</label>
-                            <input value={selectedPatient ? patientName(selectedPatient) : ''} readOnly placeholder="Select a patient above" />
-                        </div>
-                        <div className="field">
-                            <label>Payment status</label>
-                            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                                <option value="unpaid">Unpaid</option>
-                                <option value="paid">Paid</option>
-                            </select>
-                        </div>
-                        <div className="field">
-                            <label>Mode of payment</label>
-                            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-                                {MODE_OPTIONS.map((m) => (
-                                    <option key={m.value} value={m.value}>
-                                        {m.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                <div className="row">
+                    <div className="field">
+                        <label>Patient</label>
+                        <input value={selectedPatient ? patientName(selectedPatient) : ''} readOnly placeholder="Select a patient above" />
                     </div>
-                    <div>
-                        <div className="field">
-                            <label>Add service</label>
-                            <select onChange={(e) => e.target.value && addItem(types.find((t) => t.id === e.target.value))} value="">
-                                <option value="">— choose a service —</option>
-                                {types.map((t) => (
-                                    <option key={t.id} value={t.id}>
-                                        {t.name} ({t.category})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                    <div className="field">
+                        <label>Payment status</label>
+                        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                            <option value="unpaid">Unpaid</option>
+                            <option value="paid">Paid</option>
+                        </select>
                     </div>
+                    <div className="field">
+                        <label>Mode of payment</label>
+                        <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                            {MODE_OPTIONS.map((m) => (
+                                <option key={m.value} value={m.value}>
+                                    {m.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="field">
+                    <label>Add examination</label>
+                    <ServicePicker types={types} departments={departments} onPick={addItem} />
                 </div>
 
                 {items.length === 0 ? (
@@ -503,7 +630,10 @@ export default function Cashier() {
                         <tbody>
                             {items.map((i) => (
                                 <tr key={i.transaction_type_id}>
-                                    <td>{i.name}</td>
+                                    <td>
+                                        {i.name}
+                                        {i.notes && <div className="muted" style={{ fontSize: 11 }}>{i.notes}</div>}
+                                    </td>
                                     <td style={{ width: 90 }}>
                                         <input type="number" min="1" value={i.qty} onChange={(e) => setItemQty(i.transaction_type_id, e.target.value)} />
                                     </td>
@@ -522,9 +652,24 @@ export default function Cashier() {
                     </table>
                 )}
 
+                {selectedPatient?.is_senior && (
+                    <div style={{ marginTop: 14 }}>
+                        <div className="flex-between">
+                            <div className="muted">Subtotal</div>
+                            <div>₱{total.toFixed(2)}</div>
+                        </div>
+                        <div className="flex-between">
+                            <div className="muted">
+                                Senior discount ({Number(seniorRate).toFixed(2)}%)
+                            </div>
+                            <div>-₱{seniorDiscount.toFixed(2)}</div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex-between" style={{ marginTop: 14 }}>
                     <div className="muted">Total</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--blue-dark)' }}>₱{total.toFixed(2)}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--blue-dark)' }}>₱{netTotal.toFixed(2)}</div>
                 </div>
 
                 <button className="btn green" style={{ marginTop: 14 }} disabled={busy} onClick={submitTransaction}>
@@ -539,51 +684,39 @@ export default function Cashier() {
                         <span className="dot" /> Edit Transaction — {editing.receipt_no}
                     </h2>
 
-                    <div className="grid cols-2">
-                        <div>
-                            <div className="field">
-                                <label>Patient</label>
-                                <input value={editing.patient_name || ''} readOnly />
-                            </div>
-                            <div className="row">
-                                <div className="field">
-                                    <label>Payment status</label>
-                                    <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
-                                        <option value="unpaid">Unpaid</option>
-                                        <option value="paid">Paid</option>
-                                    </select>
+                    <div className="row">
+                        <div className="field">
+                            <label>Patient</label>
+                            <input value={editing.patient_name || ''} readOnly />
+                            {editing.is_senior && (
+                                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                                    <span className="badge blue">Senior</span>{' '}
+                                    {Number(editing.discount_rate || 0).toFixed(2)}% discount
                                 </div>
-                                <div className="field">
-                                    <label>Mode of payment</label>
-                                    <select value={editMode} onChange={(e) => setEditMode(e.target.value)}>
-                                        {MODE_OPTIONS.map((m) => (
-                                            <option key={m.value} value={m.value}>
-                                                {m.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
+                            )}
                         </div>
-                        <div>
-                            <div className="field">
-                                <label>Add service</label>
-                                <select
-                                    value=""
-                                    onChange={(e) => {
-                                        addEditItem(types.find((t) => t.id === e.target.value));
-                                        e.target.value = '';
-                                    }}
-                                >
-                                    <option value="">— choose a service —</option>
-                                    {types.map((t) => (
-                                        <option key={t.id} value={t.id}>
-                                            {t.name} ({t.category})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                        <div className="field">
+                            <label>Payment status</label>
+                            <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+                                <option value="unpaid">Unpaid</option>
+                                <option value="paid">Paid</option>
+                            </select>
                         </div>
+                        <div className="field">
+                            <label>Mode of payment</label>
+                            <select value={editMode} onChange={(e) => setEditMode(e.target.value)}>
+                                {MODE_OPTIONS.map((m) => (
+                                    <option key={m.value} value={m.value}>
+                                        {m.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="field">
+                        <label>Add examination</label>
+                        <ServicePicker types={types} departments={departments} onPick={addEditItem} />
                     </div>
 
                     <table>
@@ -599,7 +732,10 @@ export default function Cashier() {
                         <tbody>
                             {editItems.map((item, index) => (
                                 <tr key={item.id || item.key}>
-                                    <td>{item.name}</td>
+                                    <td>
+                                        {item.name}
+                                        {item.notes && <div className="muted" style={{ fontSize: 11 }}>{item.notes}</div>}
+                                    </td>
                                     <td style={{ width: 90 }}>
                                         <input
                                             type="number"
@@ -633,10 +769,25 @@ export default function Cashier() {
                         </tbody>
                     </table>
 
+                    {editing.is_senior && (
+                        <div style={{ marginTop: 14 }}>
+                            <div className="flex-between">
+                                <div className="muted">Subtotal</div>
+                                <div>₱{editSubtotal.toFixed(2)}</div>
+                            </div>
+                            <div className="flex-between">
+                                <div className="muted">
+                                    Senior discount ({editDiscountRate.toFixed(2)}%)
+                                </div>
+                                <div>-₱{editDiscount.toFixed(2)}</div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex-between" style={{ marginTop: 14 }}>
                         <div className="muted">Total (recalculated from items)</div>
                         <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--blue-dark)' }}>
-                            ₱{editTotal.toFixed(2)}
+                            ₱{editNet.toFixed(2)}
                         </div>
                     </div>
 
@@ -675,12 +826,22 @@ export default function Cashier() {
                             {transactions.map((t) => (
                                 <tr key={t.id}>
                                     <td>{t.receipt_no}</td>
-                                    <td>{t.patient_name}</td>
+                                    <td>
+                                        {t.patient_name}
+                                        {t.is_senior && <span className="badge blue" style={{ marginLeft: 6 }}>Senior</span>}
+                                    </td>
                                     <td>
                                         <span className={`badge ${t.status === 'paid' ? 'green' : 'warn'}`}>{t.status}</span>
                                     </td>
                                     <td>{MODE_LABEL[t.mode_of_payment] || t.mode_of_payment}</td>
-                                    <td>₱{Number(t.total_amount).toFixed(2)}</td>
+                                    <td>
+                                        ₱{Number(t.total_amount).toFixed(2)}
+                                        {Number(t.discount_amount) > 0 && (
+                                            <div className="muted" style={{ fontSize: 11 }}>
+                                                -₱{Number(t.discount_amount).toFixed(2)} senior
+                                            </div>
+                                        )}
+                                    </td>
                                     <td>{new Date(t.issued_at).toLocaleString()}</td>
                                     <td>
                                         <button className="btn sm" onClick={() => openEditor(t.id)}>

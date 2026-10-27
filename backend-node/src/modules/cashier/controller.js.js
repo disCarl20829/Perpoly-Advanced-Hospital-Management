@@ -1,5 +1,5 @@
 import * as cashierService from './service.js';
-import { validateCreatePatient, validateCreateTransactionType, validateCreateTransaction, validateUpdateTransactionStatus, validateUpdateTransaction, validateTransactionItem, validateTransactionItemUpdate } from './validation.js';
+import { validateCreatePatient, validateUpdatePatient, validateCreateTransactionType, validateUpdateTransactionType, validateCreateTransaction, validateUpdateTransactionStatus, validateUpdateTransaction, validateTransactionItem, validateTransactionItemUpdate } from './validation.js';
 
 // ============================================================
 // PATIENTS
@@ -12,7 +12,7 @@ export async function createPatient(req, res, next) {
     try {
         validateCreatePatient(req.body);
 
-        const { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no } = req.body;
+        const { last_name, first_name, middle_name, extra_name, gender, birthdate, address, contact_no, is_senior } = req.body;
 
         const patient = await cashierService.createPatient({
             last_name,
@@ -23,6 +23,7 @@ export async function createPatient(req, res, next) {
             birthdate,
             address,
             contact_no,
+            is_senior,
             created_by: req.user.id
         });
 
@@ -75,6 +76,8 @@ export async function getPatientById(req, res, next) {
  */
 export async function updatePatient(req, res, next) {
     try {
+        validateUpdatePatient(req.body);
+
         const { id } = req.params;
         const updatedPatient = await cashierService.updatePatient(id, req.body);
         res.json({ message: 'Patient updated successfully', patient: updatedPatient });
@@ -107,8 +110,14 @@ export async function createTransactionType(req, res, next) {
     try {
         validateCreateTransactionType(req.body);
 
-        const { name, category } = req.body;
-        const transactionType = await cashierService.createTransactionType({ name, category });
+        const { name, category, default_price, notes, is_active } = req.body;
+        const transactionType = await cashierService.createTransactionType({
+            name,
+            category,
+            default_price,
+            notes,
+            is_active
+        });
         res.status(201).json({ message: 'Transaction type created', transactionType });
     } catch (err) {
         next(err);
@@ -120,7 +129,15 @@ export async function createTransactionType(req, res, next) {
  */
 export async function getAllTransactionTypes(req, res, next) {
     try {
-        const transactionTypes = await cashierService.getAllTransactionTypes();
+        const filters = {};
+        if (req.query.active !== undefined) {
+            filters.active = req.query.active === 'true' || req.query.active === '1';
+        }
+        if (req.query.category) {
+            filters.category = req.query.category;
+        }
+
+        const transactionTypes = await cashierService.getAllTransactionTypes(filters);
         res.json({ transactionTypes });
     } catch (err) {
         next(err);
@@ -145,6 +162,8 @@ export async function getTransactionTypeById(req, res, next) {
  */
 export async function updateTransactionType(req, res, next) {
     try {
+        validateUpdateTransactionType(req.body);
+
         const { id } = req.params;
         const updatedTransactionType = await cashierService.updateTransactionType(id, req.body);
         res.json({ message: 'Transaction type updated', transactionType: updatedTransactionType });
