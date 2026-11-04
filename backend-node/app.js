@@ -16,8 +16,8 @@ import incomeRouter from './src/modules/income/routes.js';
 import settingsRouter from './src/modules/settings/routes.js';
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.get('/', (req, res) => {
     res.send('Welcome to the PerPoly API');

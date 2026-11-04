@@ -1,4 +1,5 @@
 import * as accountingService from './service.js';
+import { sendBuffer } from '../../utils/excel.js';
 import { validateRecordExpense, validateSystemExport } from './validation.js';
 
 // ============================================================
@@ -83,6 +84,33 @@ export async function logSystemExport(req, res, next) {
         const { system, from, to, file_path } = req.body;
         const log = await accountingService.logSystemExport(system, req.user.id, { from, to }, file_path);
         res.status(201).json({ message: 'System export logged', log });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// ============================================================
+// EXCEL EXPORTS
+// ============================================================
+
+export async function exportMaster(req, res, next) {
+    try {
+        const { from, to } = req.query;
+        const report = await accountingService.generateMasterExport(req.user.id, { from, to });
+        sendBuffer(res, report.buffer, report.filename);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function exportSystem(req, res, next) {
+    try {
+        const { system } = req.params;
+        validateSystemExport({ system });
+
+        const { from, to } = req.query;
+        const report = await accountingService.generateSystemExport(system, req.user.id, { from, to });
+        sendBuffer(res, report.buffer, report.filename);
     } catch (err) {
         next(err);
     }

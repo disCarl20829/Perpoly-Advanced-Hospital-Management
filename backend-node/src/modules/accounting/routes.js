@@ -20,6 +20,8 @@ router.get('/reports', accountingController.generateReport);
 // Exports
 router.post('/exports/master', accountingController.logMasterExport);
 router.post('/exports/system', accountingController.logSystemExport);
+router.get('/exports/master', accountingController.exportMaster);
+router.get('/exports/system/:system', accountingController.exportSystem);
 router.get('/exports/logs', accountingController.getExportLogs);
 
 export default router;

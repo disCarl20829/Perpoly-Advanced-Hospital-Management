@@ -1,4 +1,5 @@
 import * as inventoryService from './service.js';
+import { sendBuffer } from '../../utils/excel.js';
 import {
     validateCreateMaterialType,
     validateCreateMaterial,
@@ -58,6 +59,31 @@ export async function getAllMaterials(req, res, next) {
     try {
         const materials = await inventoryService.getAllMaterials();
         res.json({ materials });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function exportMaterials(req, res, next) {
+    try {
+        const { material_type_id, status, sort, order } = req.query;
+        const report = await inventoryService.generateMaterialsExcel({
+            material_type_id,
+            status,
+            sort,
+            order
+        });
+        sendBuffer(res, report.buffer, report.filename);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function exportMaterialTypes(req, res, next) {
+    try {
+        const { sort, order } = req.query;
+        const report = await inventoryService.generateMaterialTypesExcel({ sort, order });
+        sendBuffer(res, report.buffer, report.filename);
     } catch (err) {
         next(err);
     }

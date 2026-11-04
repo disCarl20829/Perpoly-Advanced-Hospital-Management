@@ -1,4 +1,5 @@
 import * as labService from './service.js';
+import { sendBuffer } from '../../utils/excel.js';
 
 // ============================================================
 // LABORATORIES
@@ -146,6 +147,28 @@ export async function getPendingTransactions(req, res, next) {
         const { laboratory_id } = req.params;
         const transactions = await labService.getPendingTransactions(laboratory_id);
         res.json({ transactions });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Export laboratory results as an Excel workbook.
+ */
+export async function exportLabResults(req, res, next) {
+    try {
+        const { laboratory_id, doctor_id, from, to, ids, status, sort, order } = req.query;
+        const report = await labService.generateLabResultsExcel({
+            laboratory_id,
+            doctor_id,
+            from,
+            to,
+            status,
+            sort,
+            order,
+            ids: ids ? ids.split(',').map((id) => id.trim()).filter(Boolean) : undefined
+        });
+        sendBuffer(res, report.buffer, report.filename);
     } catch (err) {
         next(err);
     }

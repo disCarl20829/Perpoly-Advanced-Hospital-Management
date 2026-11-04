@@ -129,6 +129,50 @@ Transaction responses include `subtotal`, `discount_rate`, `discount_amount`,
 `total_amount` (net after discount), and `is_senior`. The discount is applied
 server-side when the patient is marked as a senior citizen.
 
+### Patient import review queue
+
+Bulk imports never create patients immediately. Every file or row set is stored
+as a **batch** with row-level validation and duplicate flags for review.
+
+| Method | Path | Body / Notes |
+|--------|------|--------------|
+| `POST` | `/cashier/patient-imports` | Multipart field `file` (`.xlsx`, max 10 MB) **or** JSON `{ source_type?, rows[] }` |
+| `GET` | `/cashier/patient-imports` | List batches with `total_rows`, `new_rows`, `duplicate_rows`, `imported_rows` |
+| `GET` | `/cashier/patient-imports/:id` | Batch with its review rows |
+| `PUT` | `/cashier/patient-imports/:id/rows/:rowId` | `{ raw_data?, matched_patient_id? }` or direct patient fields; re-checks duplicates |
+| `POST` | `/cashier/patient-imports/:id/commit` | `{ rows?: [{ row_id, action: "create"\|"link" }] }` |
+
+**Excel columns:** the first row is the header. Use either separate `last_name`
+and `first_name` columns, or a single `name` column in
+`LAST, FIRST MIDDLE EXTRA` format. Common aliases are accepted (for example
+`Last Name`, `Surname`, `Birthdate`, `Date of Birth`, `Contact No.`, `Mobile
+Number`, `Senior Citizen`). Optional columns: `middle_name`, `extra_name`,
+`gender`, `birthdate`, `address`, `contact_no`, and `is_senior`.
+
+**Values:** birthdates may be Excel date cells, `YYYY-MM-DD`, `MM/DD/YYYY`, or
+`DD/MM/YYYY` when unambiguous. Senior flags accept `true/false`, `yes/no`,
+`1/0`, and `senior`. A single import is limited to **5,000 rows**.
+
+**Review behavior:**
+- Rows with missing names or invalid values stay in the queue with
+  `validation_errors` and cannot be committed until corrected.
+- Duplicate rows are flagged when the normalized name matches an existing
+  patient with the same birthdate or contact number, or when the same person
+  appears twice in the file (`_duplicate_of_row_number`).
+- `action: "create"` creates a new patient from the row.
+- `action: "link"` links the row to its `matched_patient_id` without creating a
+  duplicate patient.
+- Omitting `rows` (or sending an empty array) imports every valid `new` row;
+  invalid rows are listed in `skipped_invalid` and stay pending for correction.
+  Duplicate rows also stay pending until explicitly resolved.
+- A batch is marked `completed` when every row is imported.
+- `source_type` accepts `excel` (default) or `ocr_scan`; OCR extraction will feed
+  the same review queue later.
+
+Committed patients use `source = "imported"` and record the reviewer in
+`created_by`. The patient, row-status updates, and batch status share one
+database transaction.
+
 ---
 
 ## Settings — `/settings`
@@ -182,11 +226,19 @@ start at `₱0.00` so the cashier can enter the actual amount.
 | `POST` | `/laboratory/results` | doctor, lab_tech, superadmin | `{ transaction_item_id, laboratory_id, result_data, materials_used[] }` |
 | `GET` | `/laboratory/laboratories/:laboratory_id/results` | doctor, lab_tech, superadmin | Results by lab |
 | `GET` | `/laboratory/doctors/:doctor_id/results` | doctor, lab_tech, superadmin | Results by doctor |
+| `GET` | `/laboratory/results/export` | doctor, lab_tech, superadmin | Excel export; query: `?laboratory_id=&doctor_id=&from=&to=&ids=&status=&sort=&order=` |
 | `GET` | `/laboratory/results/:id` | doctor, lab_tech, superadmin | Single result |
 | `GET` | `/laboratory/laboratories/:laboratory_id/pending` | doctor, lab_tech, superadmin | Pending tests for a lab |
 
 Recording a result deducts `materials_used` from inventory in the **same**
 database transaction.
+
+`GET /laboratory/results/export` returns an `.xlsx` workbook with **Lab Results**
+and **Materials Used** sheets. `ids` is a comma-separated list for exporting
+selected rows; omit it to export every matching result. `sort` accepts
+`recorded_at`, `patient`, `examination`, `laboratory`, `doctor`, `status`, or
+`receipt_no`; `order` accepts `asc` or `desc`. Dates are interpreted in
+**Asia/Manila**.
 
 ---
 
@@ -198,8 +250,10 @@ Access: **inventory_staff** or **superadmin** for every route.
 |--------|------|------|
 | `POST` | `/inventory/material-types` | `{ name }` |
 | `GET` | `/inventory/material-types` | List all |
+| `GET` | `/inventory/material-types/export` | Excel export; query: `?sort=&order=` |
 | `POST` | `/inventory/materials` | `{ name, material_type_id, unit, current_stock?, reorder_threshold? }` |
 | `GET` | `/inventory/materials` | List all |
+| `GET` | `/inventory/materials/export` | Excel export; query: `?material_type_id=&status=&sort=&order=` |
 | `GET` | `/inventory/materials/:id` | Single |
 | `PUT` | `/inventory/materials/:id` | `{ name, material_type_id, unit, reorder_threshold }` |
 | `POST` | `/inventory/stock-movements` | `{ material_id, direction, qty, source, reference_id }` |
@@ -212,6 +266,11 @@ Access: **inventory_staff** or **superadmin** for every route.
 | `PUT` | `/inventory/stock-receipts/:id/mismatch` | Flag as mismatch |
 | `GET` | `/inventory/stock-status` | Stock levels / low-stock alerts |
 | `GET` | `/inventory/incoming-stock` | Pending OCR receipts |
+
+`/inventory/materials/export` supports `status=ok|low_stock|out_of_stock`.
+`sort` accepts `name`, `type`, `stock`, `threshold`, or `status`; `order`
+accepts `asc` or `desc`. The material-types export supports
+`sort=name|materials|stock|low|out`.
 
 ---
 
@@ -226,9 +285,17 @@ Access: **accountant** or **superadmin** for every route.
 | `GET` | `/accounting/expenses/summary` | `?from=&to=` |
 | `GET` | `/accounting/expenses/:id` | Single expense |
 | `GET` | `/accounting/reports` | `?from=&to=` — aggregated report |
-| `POST` | `/accounting/exports/master` | `{ from, to, file_path? }` |
-| `POST` | `/accounting/exports/system` | `{ system: "cashier"\|"laboratory"\|"inventory", from, to, file_path? }` |
+| `POST` | `/accounting/exports/master` | `{ from, to, file_path? }` — manual export log |
+| `POST` | `/accounting/exports/system` | `{ system: "cashier"\|"laboratory"\|"inventory", from, to, file_path? }` — manual export log |
+| `GET` | `/accounting/exports/master` | `.xlsx` download; query: `?from=&to=` |
+| `GET` | `/accounting/exports/system/:system` | `.xlsx` download; `system` = `cashier`, `laboratory`, or `inventory` |
 | `GET` | `/accounting/exports/logs` | Export history |
+
+`GET /accounting/exports/master` creates a workbook with **Summary**,
+**Cashier Transactions**, **Lab Results**, **Inventory Movements**, and
+**Expenses** sheets. The per-system export contains a summary, that system's
+data, and its related expenses. Every generated file is recorded in
+`accounting.export_logs`. Dates are interpreted in **Asia/Manila**.
 
 ---
 

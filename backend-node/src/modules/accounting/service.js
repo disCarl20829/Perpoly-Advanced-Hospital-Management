@@ -1,4 +1,15 @@
 import * as accountingRepo from './repository.js';
+import {
+    addTitle,
+    autoWidth,
+    createWorkbook,
+    formatManilaDate,
+    formatManilaDateTime,
+    freezeBelow,
+    MONEY_FMT,
+    writeDataRow,
+    writeHeaderRow
+} from '../../utils/excel.js';
 
 // ============================================================
 // EXPENSES
@@ -141,4 +152,272 @@ export async function logSystemExport(system, requestedBy, filters = {}, filePat
         filters,
         file_path: filePath
     });
+}
+
+// ============================================================
+// EXCEL EXPORTS
+// ============================================================
+
+/**
+ * Generate the accounting master workbook (all subsystems + expenses).
+ * @param {string} requestedBy - UUID of the user requesting the export
+ * @param {object} filters - { from, to }
+ * @returns {Promise<{buffer: Buffer, filename: string}>}
+ */
+export async function generateMasterExport(requestedBy, filters = {}) {
+    const [cashier, laboratory, inventory, expenses] = await Promise.all([
+        accountingRepo.getCashierTransactions(filters),
+        accountingRepo.getLaboratoryResults(filters),
+        accountingRepo.getInventoryMovements(filters),
+        accountingRepo.findAllExpenses(filters)
+    ]);
+
+    const workbook = createWorkbook();
+    const subtitle = buildSubtitle(filters);
+
+    buildSummarySheet(workbook, subtitle, [
+        { label: 'Cashier transactions', value: cashier.length },
+        { label: 'Cashier sales', value: sumBy(cashier, 'total_amount'), money: true },
+        { label: 'Laboratory results', value: laboratory.length },
+        { label: 'Inventory movements', value: inventory.length },
+        { label: 'Expenses', value: expenses.length },
+        { label: 'Total expenses', value: sumBy(expenses, 'amount'), money: true },
+        { label: 'Net (sales - expenses)', value: sumBy(cashier, 'total_amount') - sumBy(expenses, 'amount'), money: true }
+    ]);
+
+    buildCashierSheet(workbook, cashier, subtitle);
+    buildLaboratorySheet(workbook, laboratory, subtitle);
+    buildInventorySheet(workbook, inventory, subtitle);
+    buildExpensesSheet(workbook, expenses, subtitle);
+
+    const filename = `accounting-master-${buildRangeName(filters)}.xlsx`;
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    await logMasterExport(requestedBy, filters, filename);
+    return { buffer, filename };
+}
+
+/**
+ * Generate a per-system accounting workbook.
+ * @param {string} system - 'cashier' | 'laboratory' | 'inventory'
+ * @param {string} requestedBy - UUID of the user requesting the export
+ * @param {object} filters - { from, to }
+ * @returns {Promise<{buffer: Buffer, filename: string}>}
+ */
+export async function generateSystemExport(system, requestedBy, filters = {}) {
+    if (!['cashier', 'laboratory', 'inventory'].includes(system)) {
+        const err = new Error('system must be cashier, laboratory, or inventory');
+        err.status = 400;
+        throw err;
+    }
+
+    const expenseFilters = { ...filters, source_system: system };
+    const [cashier, laboratory, inventory, expenses] = await Promise.all([
+        system === 'cashier' ? accountingRepo.getCashierTransactions(filters) : Promise.resolve([]),
+        system === 'laboratory' ? accountingRepo.getLaboratoryResults(filters) : Promise.resolve([]),
+        system === 'inventory' ? accountingRepo.getInventoryMovements(filters) : Promise.resolve([]),
+        accountingRepo.findAllExpenses(expenseFilters)
+    ]);
+
+    const workbook = createWorkbook();
+    const subtitle = buildSubtitle(filters);
+    const recordCount = system === 'cashier'
+        ? cashier.length
+        : system === 'laboratory'
+            ? laboratory.length
+            : inventory.length;
+
+    const metrics = [
+        { label: `${system} records`, value: recordCount },
+        { label: 'Related expenses', value: expenses.length },
+        { label: 'Total expenses', value: sumBy(expenses, 'amount'), money: true }
+    ];
+
+    if (system === 'cashier') {
+        metrics.splice(1, 0, { label: 'Cashier sales', value: sumBy(cashier, 'total_amount'), money: true });
+    }
+
+    buildSummarySheet(workbook, subtitle, metrics, `ACCOUNTING ${system.toUpperCase()} EXPORT`);
+
+    if (system === 'cashier') buildCashierSheet(workbook, cashier, subtitle);
+    if (system === 'laboratory') buildLaboratorySheet(workbook, laboratory, subtitle);
+    if (system === 'inventory') buildInventorySheet(workbook, inventory, subtitle);
+    buildExpensesSheet(workbook, expenses, subtitle);
+
+    const filename = `accounting-${system}-${buildRangeName(filters)}.xlsx`;
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    await logSystemExport(system, requestedBy, filters, filename);
+    return { buffer, filename };
+}
+
+function buildSubtitle(filters = {}) {
+    const from = filters.from ? formatManilaDate(filters.from) : 'All time';
+    const to = filters.to ? formatManilaDate(filters.to) : 'present';
+    return `Period: ${from} to ${to} | Generated: ${formatManilaDateTime(new Date())}`;
+}
+
+function buildRangeName(filters = {}) {
+    const range = filters.from || filters.to
+        ? `${filters.from ? formatManilaDate(filters.from) : 'start'}-to-${filters.to ? formatManilaDate(filters.to) : 'end'}`
+        : formatManilaDate(new Date());
+    return range.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function sumBy(rows, key) {
+    return rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
+}
+
+function buildSummarySheet(workbook, subtitle, metrics, title = 'ACCOUNTING MASTER EXPORT') {
+    const sheet = workbook.addWorksheet('Summary');
+    const headers = ['Metric', 'Value'];
+    const headerRow = addTitle(sheet, title, subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    metrics.forEach((metric, index) => {
+        const row = headerRow + 1 + index;
+        writeDataRow(sheet, row, [metric.label, metric.value], { center: [2] });
+        if (metric.money) sheet.getCell(row, 2).numFmt = MONEY_FMT;
+    });
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 16, max: 45 });
+}
+
+function buildCashierSheet(workbook, transactions, subtitle) {
+    const sheet = workbook.addWorksheet('Cashier Transactions');
+    const headers = ['Date', 'Receipt No.', 'Patient', 'Status', 'Total Amount'];
+    const headerRow = addTitle(sheet, 'CASHIER TRANSACTIONS', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (transactions.length === 0) {
+        addEmptyNote(sheet, headerRow, headers.length, 'No cashier transactions found for the selected period.');
+    } else {
+        transactions.forEach((transaction, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                formatManilaDateTime(transaction.issued_at),
+                transaction.receipt_no || '',
+                transaction.patient_name || '',
+                transaction.status || '',
+                Number(transaction.total_amount || 0)
+            ], { center: [1, 2, 4], money: [5] });
+        });
+
+        const totalRow = headerRow + transactions.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        const totalCell = sheet.getCell(totalRow, 5);
+        totalCell.value = sumBy(transactions, 'total_amount');
+        totalCell.font = { bold: true, size: 10 };
+        totalCell.numFmt = MONEY_FMT;
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 12, max: 45 });
+}
+
+function buildLaboratorySheet(workbook, results, subtitle) {
+    const sheet = workbook.addWorksheet('Lab Results');
+    const headers = ['Date Recorded', 'Patient', 'Examination', 'Status'];
+    const headerRow = addTitle(sheet, 'LABORATORY RESULTS', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (results.length === 0) {
+        addEmptyNote(sheet, headerRow, headers.length, 'No laboratory results found for the selected period.');
+    } else {
+        results.forEach((result, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                formatManilaDateTime(result.recorded_at),
+                result.patient_name || '',
+                result.transaction_type_name || '',
+                result.status || ''
+            ], { center: [1, 4] });
+        });
+
+        const totalRow = headerRow + results.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total results';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        sheet.getCell(totalRow, 2).value = results.length;
+        sheet.getCell(totalRow, 2).font = { bold: true, size: 10 };
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 12, max: 45 });
+}
+
+function buildInventorySheet(workbook, movements, subtitle) {
+    const sheet = workbook.addWorksheet('Inventory Movements');
+    const headers = ['Date', 'Material', 'Direction', 'Qty', 'Unit', 'Source', 'Reference'];
+    const headerRow = addTitle(sheet, 'INVENTORY MOVEMENTS', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (movements.length === 0) {
+        addEmptyNote(sheet, headerRow, headers.length, 'No inventory movements found for the selected period.');
+    } else {
+        movements.forEach((movement, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                formatManilaDateTime(movement.created_at),
+                movement.material_name || '',
+                movement.direction || '',
+                Number(movement.qty || 0),
+                movement.material_unit || '',
+                movement.source || '',
+                movement.reference_id || ''
+            ], { center: [1, 3, 4] });
+        });
+
+        const totalRow = headerRow + movements.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total movements';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        sheet.getCell(totalRow, 2).value = movements.length;
+        sheet.getCell(totalRow, 2).font = { bold: true, size: 10 };
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 12, max: 45 });
+}
+
+function buildExpensesSheet(workbook, expenses, subtitle) {
+    const sheet = workbook.addWorksheet('Expenses');
+    const headers = ['Date Incurred', 'Source System', 'Description', 'Reference', 'Amount'];
+    const headerRow = addTitle(sheet, 'EXPENSES', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (expenses.length === 0) {
+        addEmptyNote(sheet, headerRow, headers.length, 'No expenses found for the selected period.');
+    } else {
+        expenses.forEach((expense, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                formatManilaDateTime(expense.incurred_at),
+                expense.source_system || '',
+                expense.description || '',
+                expense.source_reference_id || '',
+                Number(expense.amount || 0)
+            ], { center: [1, 2], money: [5] });
+        });
+
+        const totalRow = headerRow + expenses.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total expenses';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        const totalCell = sheet.getCell(totalRow, 5);
+        totalCell.value = sumBy(expenses, 'amount');
+        totalCell.font = { bold: true, size: 10 };
+        totalCell.numFmt = MONEY_FMT;
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 12, max: 45 });
+}
+
+function addEmptyNote(sheet, headerRow, columnCount, message) {
+    const row = headerRow + 1;
+    sheet.mergeCells(row, 1, row, columnCount);
+    const cell = sheet.getCell(row, 1);
+    cell.value = message;
+    cell.font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
 }
