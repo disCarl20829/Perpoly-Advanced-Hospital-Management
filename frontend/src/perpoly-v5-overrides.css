@@ -1,0 +1,109 @@
+/* PerPoly V5 — precise client-requested layout refinements.
+   Imported AFTER perpoly-modern.css. Does not modify form handlers or API calls. */
+
+/* Settings > Cashier Settings: the Save button should NOT stretch across the card.
+   Keep the senior discount field close to its original size. */
+.pp-workspace-settings .card:has(input[type="number"]) :is(.row, .grid):has(input[type="number"]):has(button) {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 12px 16px;
+}
+.pp-workspace-settings .card:has(input[type="number"]) :is(.row, .grid):has(input[type="number"]):has(button) > :is(.field, div):has(input[type="number"]) {
+  flex: 0 1 264px !important;
+  width: min(264px, 100%);
+  min-width: 180px;
+  max-width: 264px;
+  margin-bottom: 0;
+}
+.pp-workspace-settings .card:has(input[type="number"]) :is(.row, .grid):has(input[type="number"]):has(button) > input[type="number"] {
+  flex: 0 1 264px !important;
+  width: min(264px, 100%) !important;
+}
+.pp-workspace-settings .card:has(input[type="number"]) :is(.row, .grid):has(input[type="number"]):has(button) > :has(> button) {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: 120px;
+  padding-top: 0 !important;
+}
+.pp-workspace-settings .card:has(input[type="number"]) :is(.row, .grid):has(input[type="number"]):has(button) button {
+  flex: 0 0 auto !important;
+  width: 110px !important;
+  max-width: 110px !important;
+  min-width: 0 !important;
+  min-height: 43px;
+  padding: 10px 16px;
+  margin: 0 !important;
+  align-self: flex-end;
+}
+
+/* Income > Filters: let the From and To fields expand. Put Reset just
+   before Export Excel at the far right, bottom aligned with the date inputs. */
+@media (min-width: 960px) {
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) {
+    display: grid !important;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) 82px 136px !important;
+    column-gap: 14px;
+    row-gap: 12px;
+    align-items: end;
+  }
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(3) {
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(4) {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+}
+@media (min-width: 600px) and (max-width: 959px) {
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px 16px;
+    align-items: end;
+  }
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(3) {grid-column:2;grid-row:2;justify-self:end}
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(4) {grid-column:1;grid-row:2;justify-self:end}
+}
+@media (max-width: 599px) {
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    gap: 12px;
+    align-items: end;
+  }
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(1),
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(2) {grid-column:1 / -1}
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(3) {grid-column:2;grid-row:3;justify-self:end}
+  .pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :nth-child(4) {grid-column:1;grid-row:3;justify-self:end}
+}
+.pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :is(.field, div):has(input[type="date"]) {
+  width: 100%; min-width: 0; margin: 0;
+}
+.pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) input[type="date"] {
+  display: block; width: 100% !important; min-width: 0; min-height: 46px;
+}
+.pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :is(button, .btn) {
+  width: auto !important;
+  margin: 0 !important;
+  min-height: 46px;
+  align-self: end;
+  white-space: nowrap;
+}
+.pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :has(button) {
+  width: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  align-self: end;
+  justify-self: end;
+}
+.pp-workspace-income .card :is(.grid.cols-4, .row):has(input[type="date"]):has(button) > :has(button) button {
+  width: auto !important;
+  min-height: 46px;
+  margin: 0 !important;
+  white-space: nowrap;
+}
