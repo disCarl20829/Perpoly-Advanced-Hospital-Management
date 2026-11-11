@@ -12,6 +12,8 @@ import cashierRouter from './src/modules/cashier/routes.js';
 import laboratoryRouter from './src/modules/laboratory/routes.js';
 import inventoryRouter from './src/modules/inventory/routes.js';
 import accountingRouter from './src/modules/accounting/routes.js';
+import incomeRouter from './src/modules/income/routes.js';
+import settingsRouter from './src/modules/settings/routes.js';
 
 app.use(cors());
 app.use(express.json());
@@ -28,6 +30,8 @@ app.use('/cashier', cashierRouter);
 app.use('/laboratory', laboratoryRouter);
 app.use('/inventory', inventoryRouter);
 app.use('/accounting', accountingRouter);
+app.use('/income', incomeRouter);
+app.use('/settings', settingsRouter);
 
 app.use(errorHandler);
 

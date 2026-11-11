@@ -9,7 +9,7 @@ import db from '../../config/db.js';
  * @returns {array} list of laboratories
  */
 export async function findAllLaboratories() {
-    const query = `SELECT * FROM laboratory.laboratories ORDER BY name`;
+    const query = `SELECT * FROM laboratory.laboratories ORDER BY is_active DESC, name`;
     const { rows } = await db.query(query);
     return rows;
 }
