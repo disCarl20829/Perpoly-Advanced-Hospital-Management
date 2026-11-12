@@ -5,6 +5,60 @@ this file. The format is based on [Keep a Changelog](https://keepachangelog.com/
 
 ---
 
+## [Unreleased] — 2026-11-04
+
+### Added
+
+#### Patient import review queue
+- **Excel upload:** `POST /cashier/patient-imports` accepts a `.xlsx` file
+  (multipart field `file`, max 10 MB) or a JSON `rows` array. The first sheet
+  and first row are used, with flexible header aliases such as `Last Name`,
+  `Date of Birth`, `Contact No.`, and `Senior Citizen`.
+- **Review queue:** batches are listed with row counts, opened with all review
+  rows, and edited through
+  `PUT /cashier/patient-imports/:id/rows/:rowId`. Rows expose
+  `validation_errors`, `matched_patient_id`, and `matched_patient_name`.
+- **Duplicate detection:** normalized name plus birthdate or contact number
+  flags existing patients, while repeated people inside one file are flagged
+  with `_duplicate_of_row_number`.
+- **Commit workflow:** `POST /cashier/patient-imports/:id/commit` supports
+  per-row `create` or `link` actions. Omitting `rows` imports every valid `new`
+  row and returns invalid rows in `skipped_invalid`; duplicate rows remain
+  pending until resolved. Patients, row statuses, and the batch status are
+  committed in one database transaction.
+- Imported patients use `source = "imported"`. Invalid rows stay reviewable and
+  cannot be committed until corrected. A batch is completed only when every row
+  is imported.
+- Added `multer` and a shared Excel upload middleware for `.xlsx` validation and
+  file-size limits. JSON and form body limits were raised to 10 MB so row-based
+  imports can use the same 5,000-row cap.
+
+#### Backend Excel exports
+- **Laboratory:** `GET /laboratory/results/export` generates a workbook with
+  **Lab Results** and **Materials Used** sheets. It supports selected result
+  `ids`, laboratory/doctor filters, date range, status, and sort options.
+- **Inventory:** `GET /inventory/materials/export` exports materials with stock,
+  reorder threshold, and status (`ok`, `low_stock`, `out_of_stock`).
+  `GET /inventory/material-types/export` summarizes materials by type.
+- **Accounting:** `GET /accounting/exports/master` generates a multi-sheet
+  workbook with a summary, cashier transactions, lab results, inventory
+  movements, and expenses. `GET /accounting/exports/system/:system` exports one
+  subsystem plus its related expenses.
+- Generated accounting exports are recorded in `accounting.export_logs`.
+- Shared `src/utils/excel.js` helpers for titles, headers, borders, column
+  widths, frozen panes, money formatting, and Asia/Manila timestamps.
+- Export date filters and accounting aggregations now compare dates in
+  **Asia/Manila**, so date-only ranges include the full local day.
+
+### Changed
+
+- `GET /laboratory/results/export`, `/inventory/materials/export`,
+  `/inventory/material-types/export`, and the accounting export downloads return
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` files with
+  a `Content-Disposition` filename.
+
+---
+
 ## [Unreleased] — 2026-10-28
 
 ### Added
@@ -42,15 +96,28 @@ this file. The format is based on [Keep a Changelog](https://keepachangelog.com/
 - Invoice number column uses the numeric suffix of `receipt_no`
   (for example `RCPT-20261027-000005` → `5`). The final client invoice format
   can replace this later.
-- The PACKAGE (Employment) summary row is reserved and currently `₱0.00`
-  because the client has not provided package examinations. Deposits are not
-  tracked and `TOTAL DEPOSIT` is `₱0.00`.
+- The `PACKAGE (Employment)` and `TOTAL DEPOSIT` rows are placeholders; see
+  **Future work** below.
 
 ### Changed
 - `POST /cashier/patients` and `PUT /cashier/patients/:id` accept `is_senior`.
 - `PUT /cashier/patients/:id` now performs a true partial update.
 - Cashier transaction creation computes the discount on the server; the
   frontend discount preview is informational only.
+
+### Future work
+
+#### Packages and deposits (pending client input)
+- **Packages:** The report template includes a `PACKAGE (Employment)` row, but
+  the client has not provided the package contents, pricing, or final report
+  layout/visualization. Package definitions and package transactions are
+  therefore not implemented; the row remains `₱0.00`.
+- **Deposits:** The template includes `TOTAL DEPOSIT` and `CASH END`, but the
+  client has not provided the deposit/partial-payment rules or final report
+  layout/visualization. Deposit tracking is therefore not implemented;
+  `TOTAL DEPOSIT` remains `₱0.00` and `CASH END` currently equals total sales.
+- Both features require backend schema/API work and will be scheduled after the
+  client provides the missing details.
 
 ---
 

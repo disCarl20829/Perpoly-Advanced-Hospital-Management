@@ -254,3 +254,106 @@ export function validateTransactionItemUpdate(body) {
         throw err;
     }
 }
+
+// ============================================================
+// PATIENT IMPORT
+// ============================================================
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Collect validation errors for one import row without throwing.
+ * This lets the review queue display invalid rows before committing.
+ * @param {object} raw - import row data
+ * @returns {string[]} validation errors
+ */
+export function getPatientImportRowErrors(raw = {}) {
+    const errors = [];
+
+    if (!raw.last_name || !String(raw.last_name).trim()) {
+        errors.push('last_name is required');
+    }
+    if (!raw.first_name || !String(raw.first_name).trim()) {
+        errors.push('first_name is required');
+    }
+
+    if (raw.birthdate) {
+        const value = String(raw.birthdate);
+        const date = DATE_ONLY_RE.test(value) ? new Date(`${value}T00:00:00Z`) : null;
+        if (!date || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+            errors.push('birthdate must be a valid YYYY-MM-DD date');
+        }
+    }
+
+    if (raw.is_senior !== undefined && typeof raw.is_senior !== 'boolean') {
+        errors.push('is_senior must be a boolean');
+    }
+
+    if (raw.gender !== undefined && raw.gender !== null && typeof raw.gender !== 'string') {
+        errors.push('gender must be a string');
+    }
+
+    if (raw.contact_no !== undefined && raw.contact_no !== null && typeof raw.contact_no !== 'string') {
+        errors.push('contact_no must be a string');
+    }
+
+    return errors;
+}
+
+/**
+ * Validate the commit request body.
+ * @param {object} body - req.body
+ * @throws {Error} if validation fails
+ */
+export function validateCommitPatientImport(body = {}) {
+    if (body.rows !== undefined && !Array.isArray(body.rows)) {
+        const err = new Error('rows must be an array');
+        err.status = 400;
+        throw err;
+    }
+
+    if (body.rows === undefined) return;
+
+    const seen = new Set();
+    for (const row of body.rows) {
+        if (!row || typeof row !== 'object' || !row.row_id) {
+            const err = new Error('Each commit row requires a row_id');
+            err.status = 400;
+            throw err;
+        }
+        if (!['create', 'link'].includes(row.action)) {
+            const err = new Error('Each commit row action must be "create" or "link"');
+            err.status = 400;
+            throw err;
+        }
+        if (seen.has(row.row_id)) {
+            const err = new Error('Duplicate row_id in commit request');
+            err.status = 400;
+            throw err;
+        }
+        seen.add(row.row_id);
+    }
+}
+
+/**
+ * Validate an import-row review update.
+ * @param {object} body - req.body
+ * @throws {Error} if validation fails
+ */
+export function validateUpdatePatientImportRow(body = {}) {
+    if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
+        const err = new Error('Provide row data or matched_patient_id');
+        err.status = 400;
+        throw err;
+    }
+    if (body.raw_data !== undefined && (body.raw_data === null || typeof body.raw_data !== 'object' || Array.isArray(body.raw_data))) {
+        const err = new Error('raw_data must be an object');
+        err.status = 400;
+        throw err;
+    }
+    if (body.matched_patient_id !== undefined && body.matched_patient_id !== null && typeof body.matched_patient_id !== 'string') {
+        const err = new Error('matched_patient_id must be a UUID string or null');
+        err.status = 400;
+        throw err;
+    }
+}

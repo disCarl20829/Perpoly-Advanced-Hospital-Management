@@ -1,5 +1,5 @@
 import express from 'express';
-import * as inventoryController from './controller.js.js';
+import * as inventoryController from './controller.js';
 import authenticate from '../../middleware/auth.middleware.js';
 import authorize from '../../middleware/rbac.middleware.js';
 
@@ -11,10 +11,12 @@ router.use(authenticate, authorize('inventory_staff', 'superadmin'));
 // Material types
 router.post('/material-types', inventoryController.createMaterialType);
 router.get('/material-types', inventoryController.getAllMaterialTypes);
+router.get('/material-types/export', inventoryController.exportMaterialTypes);
 
 // Materials
 router.post('/materials', inventoryController.createMaterial);
 router.get('/materials', inventoryController.getAllMaterials);
+router.get('/materials/export', inventoryController.exportMaterials);
 router.get('/materials/:id', inventoryController.getMaterialById);
 router.put('/materials/:id', inventoryController.updateMaterial);
 

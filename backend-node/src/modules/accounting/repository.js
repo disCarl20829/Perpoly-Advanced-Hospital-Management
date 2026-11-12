@@ -34,11 +34,11 @@ export async function findAllExpenses(filters = {}) {
     }
     if (filters.from) {
         params.push(filters.from);
-        query += ` AND incurred_at >= $${params.length}`;
+        query += ` AND (incurred_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
     }
     if (filters.to) {
         params.push(filters.to);
-        query += ` AND incurred_at <= $${params.length}`;
+        query += ` AND (incurred_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
     }
 
     query += ` ORDER BY incurred_at DESC`;
@@ -73,11 +73,11 @@ export async function getExpenseSummary(filters = {}) {
 
     if (filters.from) {
         params.push(filters.from);
-        query += ` AND incurred_at >= $${params.length}`;
+        query += ` AND (incurred_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
     }
     if (filters.to) {
         params.push(filters.to);
-        query += ` AND incurred_at <= $${params.length}`;
+        query += ` AND (incurred_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
     }
 
     query += ` GROUP BY source_system ORDER BY source_system`;
@@ -135,11 +135,11 @@ export async function getCashierTransactions(filters = {}) {
 
     if (filters.from) {
         params.push(filters.from);
-        query += ` AND t.issued_at >= $${params.length}`;
+        query += ` AND (t.issued_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
     }
     if (filters.to) {
         params.push(filters.to);
-        query += ` AND t.issued_at <= $${params.length}`;
+        query += ` AND (t.issued_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
     }
 
     query += ` ORDER BY t.issued_at DESC`;
@@ -169,11 +169,11 @@ export async function getLaboratoryResults(filters = {}) {
 
     if (filters.from) {
         params.push(filters.from);
-        query += ` AND lr.recorded_at >= $${params.length}`;
+        query += ` AND (lr.recorded_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
     }
     if (filters.to) {
         params.push(filters.to);
-        query += ` AND lr.recorded_at <= $${params.length}`;
+        query += ` AND (lr.recorded_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
     }
 
     query += ` ORDER BY lr.recorded_at DESC`;
@@ -198,11 +198,11 @@ export async function getInventoryMovements(filters = {}) {
 
     if (filters.from) {
         params.push(filters.from);
-        query += ` AND sm.created_at >= $${params.length}`;
+        query += ` AND (sm.created_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
     }
     if (filters.to) {
         params.push(filters.to);
-        query += ` AND sm.created_at <= $${params.length}`;
+        query += ` AND (sm.created_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
     }
 
     query += ` ORDER BY sm.created_at DESC`;

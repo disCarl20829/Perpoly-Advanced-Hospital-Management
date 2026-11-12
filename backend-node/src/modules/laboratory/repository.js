@@ -230,3 +230,92 @@ export async function findPendingTransactions(laboratoryId) {
     const { rows } = await db.query(query, [laboratoryId]);
     return rows;
 }
+
+/**
+ * Find lab results for the Excel export.
+ * @param {object} filters - { laboratory_id, doctor_id, from, to, ids, status, sort, order }
+ * @returns {array} export-ready lab results
+ */
+export async function findLabResultsForExport(filters = {}) {
+    if (Array.isArray(filters.ids) && filters.ids.length === 0) return [];
+
+    const sortColumns = {
+        recorded_at: 'lr.recorded_at',
+        patient: 'patient_name',
+        examination: 'tt.name',
+        laboratory: 'l.name',
+        doctor: 'doctor_name',
+        status: 'lr.status',
+        receipt_no: 't.receipt_no'
+    };
+    const sortColumn = sortColumns[filters.sort] || sortColumns.recorded_at;
+    const direction = filters.order === 'asc' ? 'ASC' : 'DESC';
+
+    let query = `
+        SELECT lr.id, lr.result_data, lr.status, lr.recorded_at,
+               t.receipt_no, t.issued_at,
+               TRIM(CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name, p.extra_name)) AS patient_name,
+               l.name AS laboratory_name,
+               tt.name AS examination_name,
+               TRIM(CONCAT_WS(' ', d.first_name, d.middle_name, d.last_name, d.extra_name)) AS doctor_name
+        FROM laboratory.lab_results lr
+        JOIN laboratory.laboratories l ON l.id = lr.laboratory_id
+        JOIN authentication.users d ON d.id = lr.doctor_id
+        JOIN cashier.transaction_items ti ON ti.id = lr.transaction_item_id
+        JOIN cashier.transactions t ON t.id = ti.transaction_id
+        JOIN cashier.patients p ON p.id = t.patient_id
+        JOIN cashier.transaction_types tt ON tt.id = ti.transaction_type_id
+        WHERE 1=1
+    `;
+    const params = [];
+
+    if (filters.laboratory_id) {
+        params.push(filters.laboratory_id);
+        query += ` AND lr.laboratory_id = $${params.length}`;
+    }
+    if (filters.doctor_id) {
+        params.push(filters.doctor_id);
+        query += ` AND lr.doctor_id = $${params.length}`;
+    }
+    if (filters.from) {
+        params.push(filters.from);
+        query += ` AND (lr.recorded_at AT TIME ZONE 'Asia/Manila')::date >= $${params.length}::date`;
+    }
+    if (filters.to) {
+        params.push(filters.to);
+        query += ` AND (lr.recorded_at AT TIME ZONE 'Asia/Manila')::date <= $${params.length}::date`;
+    }
+    if (filters.status) {
+        params.push(filters.status);
+        query += ` AND lr.status = $${params.length}::laboratory.result_status`;
+    }
+    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
+        params.push(filters.ids);
+        query += ` AND lr.id = ANY($${params.length}::uuid[])`;
+    }
+
+    query += ` ORDER BY ${sortColumn} ${direction} NULLS LAST, lr.id`;
+
+    const { rows } = await db.query(query, params);
+    return rows;
+}
+
+/**
+ * Get materials used for several lab results at once (export).
+ * @param {string[]} resultIds - lab result UUIDs
+ * @returns {array} material usage rows
+ */
+export async function findMaterialsUsedForResults(resultIds) {
+    if (!Array.isArray(resultIds) || resultIds.length === 0) return [];
+
+    const query = `
+        SELECT lrmu.lab_result_id, lrmu.qty_used,
+               m.name AS material_name, m.unit AS material_unit
+        FROM laboratory.lab_result_materials_used lrmu
+        JOIN inventory.materials m ON m.id = lrmu.material_id
+        WHERE lrmu.lab_result_id = ANY($1::uuid[])
+        ORDER BY m.name
+    `;
+    const { rows } = await db.query(query, [resultIds]);
+    return rows;
+}

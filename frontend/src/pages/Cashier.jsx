@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api.js';
 
 const EMPTY_PATIENT = {
@@ -101,6 +101,15 @@ function ServicePicker({ types, departments, onPick }) {
 export default function Cashier() {
     const [search, setSearch] = useState('');
     const [patients, setPatients] = useState([]);
+    const [recentPatients, setRecentPatients] = useState([]);
+    const [searchResults, setSearchResults] = useState([]);
+    const [patientsLoading, setPatientsLoading] = useState(true);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [patientListStatus, setPatientListStatus] = useState('checking');
+    const [patientListError, setPatientListError] = useState('');
+    const [searchError, setSearchError] = useState('');
+    const patientRequestSeq = useRef(0);
+    const searchRequestSeq = useRef(0);
     const [patientForm, setPatientForm] = useState(EMPTY_PATIENT);
     const [selectedPatient, setSelectedPatient] = useState(null);
 
@@ -122,12 +131,115 @@ export default function Cashier() {
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
 
+    // A patient-directory endpoint is separate from the name search endpoint.
+    // /cashier/patients/search rejects blank or one-character queries.
+    // GET /cashier/patients must return { patients: [...] } for a complete directory.
+    const loadPatients = useCallback(async ({ silent = false } = {}) => {
+        const requestId = ++patientRequestSeq.current;
+        if (!silent) setPatientsLoading(true);
+        try {
+            const data = await api.get('/cashier/patients');
+            const rows = Array.isArray(data) ? data : data?.patients;
+            if (!Array.isArray(rows)) {
+                throw new Error('GET /cashier/patients must return a patients array.');
+            }
+            if (requestId === patientRequestSeq.current) {
+                setPatients(rows);
+                setPatientListStatus('available');
+                setPatientListError('');
+            }
+        } catch (error) {
+            if (requestId === patientRequestSeq.current) {
+                setPatientListStatus('unavailable');
+                setPatientListError(error.message || 'Unable to load the full patient directory.');
+            }
+        } finally {
+            if (requestId === patientRequestSeq.current) setPatientsLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         loadTypes();
         loadDepartments();
         loadTransactions();
         loadSeniorRate();
     }, []);
+
+    useEffect(() => {
+        void loadPatients();
+        return () => {
+            patientRequestSeq.current += 1;
+        };
+    }, [loadPatients]);
+
+    // Poll only when the backend supports a full patient directory.
+    // This prevents the repeated 400 errors from V7.
+    useEffect(() => {
+        if (patientListStatus !== 'available') return;
+        const timer = window.setInterval(() => {
+            if (!document.hidden) void loadPatients({ silent: true });
+        }, 15000);
+        return () => window.clearInterval(timer);
+    }, [patientListStatus, loadPatients]);
+
+    // When the list route is missing, keep the old working search behavior.
+    // Only send searches with 2+ characters, as required by the backend.
+    useEffect(() => {
+        const query = search.trim();
+        if (patientListStatus !== 'unavailable' || query.length < 2) {
+            searchRequestSeq.current += 1;
+            setSearchResults([]);
+            setSearchError('');
+            setSearchLoading(false);
+            return;
+        }
+
+        const requestId = ++searchRequestSeq.current;
+        setSearchLoading(true);
+        setSearchError('');
+        const timer = window.setTimeout(async () => {
+            try {
+                const data = await api.get(`/cashier/patients/search?name=${encodeURIComponent(query)}`);
+                if (!Array.isArray(data?.patients)) {
+                    throw new Error('Unexpected patient search response.');
+                }
+                if (requestId === searchRequestSeq.current) {
+                    setSearchResults(data.patients);
+                    setSearchError('');
+                }
+            } catch (error) {
+                if (requestId === searchRequestSeq.current) {
+                    setSearchResults([]);
+                    setSearchError(error.message || 'Unable to search patients.');
+                }
+            } finally {
+                if (requestId === searchRequestSeq.current) setSearchLoading(false);
+            }
+        }, 300);
+        return () => {
+            window.clearTimeout(timer);
+            searchRequestSeq.current += 1;
+        };
+    }, [search, patientListStatus]);
+
+    // Keep patient records created in this session, even if the all-patients
+    // endpoint is unavailable or a refresh happens before the server catches up.
+    const rowsById = new Map();
+    const fromServer = patientListStatus === 'available'
+        ? patients
+        : search.trim().length >= 2 ? searchResults : [];
+    for (const patient of [...fromServer, ...recentPatients]) {
+        if (patient?.id != null) rowsById.set(String(patient.id), patient);
+    }
+    const allVisibleCandidates = [...rowsById.values()];
+    const queryTerms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const visiblePatients = allVisibleCandidates
+        .filter((p) => {
+            const searchable = [p.first_name, p.middle_name, p.last_name,
+                p.extra_name, patientName(p), p.contact_no].filter(Boolean).join(' ').toLowerCase();
+            return queryTerms.every((term) => searchable.includes(term));
+        })
+        .sort((a, b) => patientName(a).localeCompare(patientName(b)));
 
     const loadSeniorRate = async () => {
         try {
@@ -167,26 +279,47 @@ export default function Cashier() {
         }
     };
 
-    const doSearch = async () => {
-        setErr('');
-        try {
-            const d = await api.get(`/cashier/patients/search?name=${encodeURIComponent(search)}`);
-            setPatients(d.patients);
-        } catch (e) {
-            setErr(e.message);
-        }
-    };
-
     const createPatient = async () => {
         setErr('');
         setMsg('');
+        const lastName = patientForm.last_name.trim();
+        const firstName = patientForm.first_name.trim();
+        if (!lastName || !firstName) {
+            setErr('Last name and first name are required.');
+            return;
+        }
+
+        setBusy(true);
         try {
-            const d = await api.post('/cashier/patients', patientForm);
-            setMsg('Patient created.');
-            setSelectedPatient(d.patient);
-            setPatientForm(EMPTY_PATIENT);
+            const d = await api.post('/cashier/patients', {
+                ...patientForm,
+                last_name: lastName,
+                first_name: firstName
+            });
+            const createdPatient = d.patient;
+            if (!createdPatient?.id) {
+                throw new Error('Patient was saved, but the API did not return the patient record.');
+            }
+
+            // Always display the created patient, even without a directory route.
+            // This is session-only state; the database remains authoritative.
+            setRecentPatients((current) => [
+                createdPatient,
+                ...current.filter((p) => String(p.id) !== String(createdPatient.id))
+            ]);
+            setSelectedPatient(createdPatient);
+            setSearch('');
+            setMsg('Patient created and added to the list.');
+            setPatientForm({ ...EMPTY_PATIENT });
+
+            // Refresh only if the backend exposes the full directory endpoint.
+            if (patientListStatus === 'available') {
+                void loadPatients({ silent: true });
+            }
         } catch (e) {
             setErr(e.message);
+        } finally {
+            setBusy(false);
         }
     };
 
@@ -429,51 +562,98 @@ export default function Cashier() {
                     <h2>
                         <span className="dot" /> Find Patient
                     </h2>
-                    <div className="flex-between gap-8" style={{ marginBottom: 12 }}>
+                    <div className="flex-between gap-8" style={{ marginBottom: 8 }}>
                         <input
-                            placeholder="Search by name…"
+                            aria-label="Filter patients"
+                            placeholder={patientListStatus === 'available'
+                                ? 'Filter all patients by name…'
+                                : 'Search patients (at least 2 characters)…'}
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && doSearch()}
                         />
-                        <button className="btn sm" onClick={doSearch}>
-                            Search
+                        <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => void loadPatients()}
+                            disabled={patientsLoading}
+                            title="Retry loading the full patient list"
+                        >
+                            {patientsLoading ? 'Loading…' : 'Refresh'}
                         </button>
                     </div>
-
-                    {patients.length === 0 ? (
-                        <div className="empty">No patients found.</div>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                        {patientListStatus === 'available'
+                            ? `Showing ${visiblePatients.length} of ${allVisibleCandidates.length} patients · Updates every 15 seconds`
+                            : patientListStatus === 'checking'
+                                ? 'Checking the patient directory…'
+                                : `Showing ${visiblePatients.length} matching patients · Name search is available`}
+                    </div>
+                    {patientListStatus === 'unavailable' && (
+                        <div role="status" style={{ marginBottom: 10, padding: '10px 12px',
+                            borderRadius: 9, border: '1px solid #eed3a6',
+                            background: '#fffaf0', color: '#72511e', fontSize: 12 }}>
+                            <strong>Full patient list is not available from the API.</strong>{' '}
+                            Search existing patients using 2 or more characters.
+                            To show everyone automatically, the backend must support
+                            <code> GET /cashier/patients</code> returning a patient array.
+                            {patientListError && (
+                                <div style={{ marginTop: 4, opacity: 0.8 }}>
+                                    Server response: {patientListError}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {searchError && (
+                        <div className="alert error" role="alert" style={{ marginBottom: 10 }}>
+                            Patient search: {searchError}
+                        </div>
+                    )}
+                    {patientListStatus === 'checking' && patientsLoading && allVisibleCandidates.length === 0 ? (
+                        <div className="empty">Loading patient records…</div>
+                    ) : searchLoading && visiblePatients.length === 0 ? (
+                        <div className="empty">Searching patients…</div>
+                    ) : visiblePatients.length === 0 ? (
+                        <div className="empty">
+                            {patientListStatus === 'unavailable' && search.trim().length < 2
+                                ? 'Enter at least 2 characters to search existing patients.'
+                                : search.trim()
+                                    ? 'No patients match your search.'
+                                    : 'No patients found.'}
+                        </div>
                     ) : (
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Gender</th>
-                                    <th>Contact</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {patients.map((p) => (
-                                    <tr key={p.id}>
-                                        <td>
-                                            {patientName(p)}
-                                            {p.is_senior && <span className="badge blue" style={{ marginLeft: 6 }}>Senior</span>}
-                                        </td>
-                                        <td>{p.gender || '—'}</td>
-                                        <td>{p.contact_no || '—'}</td>
-                                        <td>
-                                            <button
-                                                className="btn sm green"
-                                                onClick={() => setSelectedPatient(p)}
-                                            >
-                                                Select
-                                            </button>
-                                        </td>
+                        <div style={{ maxHeight: 280, overflowY: 'auto', overflowX: 'auto' }}>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Gender</th>
+                                        <th>Contact</th>
+                                        <th></th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {visiblePatients.map((p) => (
+                                        <tr key={p.id}>
+                                            <td>
+                                                {patientName(p)}
+                                                {p.is_senior && <span className="badge blue" style={{ marginLeft: 6 }}>Senior</span>}
+                                            </td>
+                                            <td>{p.gender || '—'}</td>
+                                            <td>{p.contact_no || '—'}</td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    className="btn sm green"
+                                                    onClick={() => setSelectedPatient(p)}
+                                                >
+                                                    Select
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
 
                     {selectedPatient && (
@@ -573,8 +753,8 @@ export default function Cashier() {
                         />
                         Senior citizen (discount applies)
                     </label>
-                    <button className="btn" onClick={createPatient}>
-                        Create Patient
+                    <button className="btn" onClick={createPatient} disabled={busy}>
+                        {busy ? 'Creating…' : 'Create Patient'}
                     </button>
                 </div>
             </div>

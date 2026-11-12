@@ -1,5 +1,5 @@
 import express from 'express';
-import * as authController from './controller.js.js';
+import * as authController from './controller.js';
 import authenticate from '../../middleware/auth.middleware.js';
 import authorize from '../../middleware/rbac.middleware.js';
 

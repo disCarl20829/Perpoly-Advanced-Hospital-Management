@@ -1,5 +1,5 @@
 import express from 'express';
-import * as incomeController from './controller.js.js';
+import * as incomeController from './controller.js';
 import authenticate from '../../middleware/auth.middleware.js';
 
 const router = express.Router();

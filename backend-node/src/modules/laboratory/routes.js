@@ -1,5 +1,5 @@
 import express from 'express';
-import * as labController from './controller.js.js';
+import * as labController from './controller.js';
 import authenticate from '../../middleware/auth.middleware.js';
 import authorize from '../../middleware/rbac.middleware.js';
 
@@ -21,6 +21,7 @@ router.delete('/laboratories/:laboratory_id/defaults/:material_id', authorize('d
 router.post('/results', authorize('doctor', 'lab_tech', 'superadmin'), labController.createLabResult);
 router.get('/laboratories/:laboratory_id/results', authorize('doctor', 'lab_tech', 'superadmin'), labController.getLabResultsByLaboratory);
 router.get('/doctors/:doctor_id/results', authorize('doctor', 'lab_tech', 'superadmin'), labController.getLabResultsByDoctor);
+router.get('/results/export', authorize('doctor', 'lab_tech', 'superadmin'), labController.exportLabResults);
 router.get('/results/:id', authorize('doctor', 'lab_tech', 'superadmin'), labController.getLabResultById);
 
 // Pending transactions (doctor, lab_tech, superadmin)

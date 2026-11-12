@@ -1,5 +1,5 @@
 import * as cashierService from './service.js';
-import { validateCreatePatient, validateUpdatePatient, validateCreateTransactionType, validateUpdateTransactionType, validateCreateTransaction, validateUpdateTransactionStatus, validateUpdateTransaction, validateTransactionItem, validateTransactionItemUpdate } from './validation.js';
+import { validateCreatePatient, validateUpdatePatient, validateCreateTransactionType, validateUpdateTransactionType, validateCreateTransaction, validateUpdateTransactionStatus, validateUpdateTransaction, validateTransactionItem, validateTransactionItemUpdate, validateCommitPatientImport, validateUpdatePatientImportRow } from './validation.js';
 
 // ============================================================
 // PATIENTS
@@ -337,6 +337,81 @@ export async function deleteTransactionItem(req, res, next) {
         const { id, itemId } = req.params;
         const result = await cashierService.deleteTransactionItem(id, itemId);
         res.json({ message: 'Transaction item deleted', ...result });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// ============================================================
+// PATIENT IMPORT
+// ============================================================
+
+/**
+ * Upload an Excel file or JSON rows for patient import review.
+ */
+export async function createPatientImport(req, res, next) {
+    try {
+        const { rows, source_type } = req.body || {};
+        const result = await cashierService.createPatientImport({
+            file: req.file,
+            rows,
+            source_type: source_type || 'excel',
+            uploaded_by: req.user.id
+        });
+        res.status(201).json({ message: 'Patient import created for review', ...result });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * List patient import batches.
+ */
+export async function getPatientImportBatches(req, res, next) {
+    try {
+        const batches = await cashierService.getPatientImportBatches();
+        res.json({ batches });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Get one patient import batch and its review rows.
+ */
+export async function getPatientImportBatch(req, res, next) {
+    try {
+        const { id } = req.params;
+        const batch = await cashierService.getPatientImportBatch(id);
+        res.json({ batch });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Edit a patient import row before committing.
+ */
+export async function updatePatientImportRow(req, res, next) {
+    try {
+        validateUpdatePatientImportRow(req.body);
+        const { id, rowId } = req.params;
+        const row = await cashierService.updatePatientImportRow(id, rowId, req.body);
+        res.json({ message: 'Import row updated', row });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Commit selected patient import rows.
+ */
+export async function commitPatientImport(req, res, next) {
+    try {
+        validateCommitPatientImport(req.body);
+        const { id } = req.params;
+        const result = await cashierService.commitPatientImport(id, req.body || {}, req.user.id);
+        res.json({ message: 'Patient import committed', ...result });
     } catch (err) {
         next(err);
     }

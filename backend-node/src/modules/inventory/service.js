@@ -1,4 +1,14 @@
 import * as inventoryRepo from './repository.js';
+import {
+    addTitle,
+    autoWidth,
+    createWorkbook,
+    formatManilaDate,
+    formatManilaDateTime,
+    freezeBelow,
+    writeDataRow,
+    writeHeaderRow
+} from '../../utils/excel.js';
 
 // ============================================================
 // MATERIAL TYPES
@@ -279,4 +289,246 @@ export async function getStockStatus() {
  */
 export async function getIncomingStock() {
     return await inventoryRepo.findAllStockReceiptsOcr();
+}
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
+const STATUS_LABELS = {
+    ok: 'OK',
+    low_stock: 'LOW STOCK',
+    out_of_stock: 'OUT OF STOCK'
+};
+
+const STATUS_PRIORITY = {
+    out_of_stock: 0,
+    low_stock: 1,
+    ok: 2
+};
+
+/**
+ * Generate an Excel workbook of materials with quantity, threshold, and status.
+ * @param {object} filters - { material_type_id, status, sort, order }
+ * @returns {Promise<{buffer: Buffer, filename: string, count: number}>}
+ */
+export async function generateMaterialsExcel(filters = {}) {
+    const sortOptions = ['name', 'type', 'stock', 'threshold', 'status'];
+    if (filters.sort && !sortOptions.includes(filters.sort)) {
+        const err = new Error(`sort must be one of: ${sortOptions.join(', ')}`);
+        err.status = 400;
+        throw err;
+    }
+    if (filters.status && !Object.keys(STATUS_LABELS).includes(filters.status)) {
+        const err = new Error(`status must be one of: ${Object.keys(STATUS_LABELS).join(', ')}`);
+        err.status = 400;
+        throw err;
+    }
+
+    let materials = await getStockStatus();
+
+    if (filters.material_type_id) {
+        materials = materials.filter((material) => material.material_type_id === filters.material_type_id);
+    }
+    if (filters.status) {
+        materials = materials.filter((material) => material.status === filters.status);
+    }
+
+    const sortKey = filters.sort || 'name';
+    const direction = filters.order === 'desc' ? -1 : 1;
+    materials.sort((a, b) => {
+        let left;
+        let right;
+
+        switch (sortKey) {
+            case 'type':
+                left = a.material_type_name || '';
+                right = b.material_type_name || '';
+                return direction * left.localeCompare(right);
+            case 'stock':
+                left = Number(a.current_stock || 0);
+                right = Number(b.current_stock || 0);
+                break;
+            case 'threshold':
+                left = Number(a.reorder_threshold || 0);
+                right = Number(b.reorder_threshold || 0);
+                break;
+            case 'status':
+                left = STATUS_PRIORITY[a.status];
+                right = STATUS_PRIORITY[b.status];
+                break;
+            default:
+                left = a.name || '';
+                right = b.name || '';
+                return direction * left.localeCompare(right);
+        }
+
+        if (left === right) return direction * String(a.name || '').localeCompare(String(b.name || ''));
+        return direction * (left - right);
+    });
+
+    const workbook = createWorkbook();
+    const sheet = workbook.addWorksheet('Materials');
+    const headers = ['Material', 'Type', 'Unit', 'Current Stock', 'Reorder Threshold', 'Status'];
+    const subtitle = `As of ${formatManilaDateTime(new Date())}`;
+    const headerRow = addTitle(sheet, 'INVENTORY MATERIALS REPORT', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (materials.length === 0) {
+        const row = headerRow + 1;
+        sheet.mergeCells(row, 1, row, headers.length);
+        const cell = sheet.getCell(row, 1);
+        cell.value = 'No materials found for the selected filters.';
+        cell.font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    } else {
+        materials.forEach((material, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                material.name || '',
+                material.material_type_name || 'Unassigned',
+                material.unit || '',
+                Number(material.current_stock || 0),
+                Number(material.reorder_threshold || 0),
+                STATUS_LABELS[material.status] || material.status
+            ], { center: [4, 5, 6] });
+
+            const statusCell = sheet.getCell(row, 6);
+            statusCell.font = {
+                bold: true,
+                size: 10,
+                color: {
+                    argb: material.status === 'out_of_stock'
+                        ? 'FF991B1B'
+                        : material.status === 'low_stock'
+                            ? 'FF92400E'
+                            : 'FF166534'
+                }
+            };
+        });
+
+        const totalRow = headerRow + materials.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total materials';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        sheet.getCell(totalRow, 2).value = materials.length;
+        sheet.getCell(totalRow, 2).font = { bold: true, size: 10 };
+        sheet.getCell(totalRow, 5).value = 'Out of stock';
+        sheet.getCell(totalRow, 5).font = { bold: true, size: 10 };
+        sheet.getCell(totalRow, 6).value = materials.filter((material) => material.status === 'out_of_stock').length;
+        sheet.getCell(totalRow, 6).font = { bold: true, size: 10 };
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 12, max: 45 });
+
+    const filename = `inventory-materials-${formatManilaDate(new Date())}.xlsx`;
+    const buffer = await workbook.xlsx.writeBuffer();
+    return { buffer, filename, count: materials.length };
+}
+
+/**
+ * Generate an Excel workbook summarizing materials by material type.
+ * @param {object} filters - { sort, order }
+ * @returns {Promise<{buffer: Buffer, filename: string, count: number}>}
+ */
+export async function generateMaterialTypesExcel(filters = {}) {
+    const sortOptions = ['name', 'materials', 'stock', 'low', 'out'];
+    if (filters.sort && !sortOptions.includes(filters.sort)) {
+        const err = new Error(`sort must be one of: ${sortOptions.join(', ')}`);
+        err.status = 400;
+        throw err;
+    }
+
+    const [types, materials] = await Promise.all([
+        inventoryRepo.findAllMaterialTypes(),
+        getStockStatus()
+    ]);
+
+    const byType = new Map();
+    for (const type of types) {
+        byType.set(type.id, {
+            name: type.name,
+            materials: 0,
+            stock: 0,
+            low: 0,
+            out: 0
+        });
+    }
+
+    for (const material of materials) {
+        const key = material.material_type_id;
+        if (!byType.has(key)) {
+            byType.set(key, {
+                name: 'Unassigned',
+                materials: 0,
+                stock: 0,
+                low: 0,
+                out: 0
+            });
+        }
+
+        const entry = byType.get(key);
+        entry.materials += 1;
+        entry.stock += Number(material.current_stock || 0);
+        if (material.status === 'low_stock') entry.low += 1;
+        if (material.status === 'out_of_stock') entry.out += 1;
+    }
+
+    const rows = Array.from(byType.values());
+    const sortKey = filters.sort || 'name';
+    const direction = filters.order === 'desc' ? -1 : 1;
+    rows.sort((a, b) => {
+        if (sortKey === 'name') return direction * a.name.localeCompare(b.name);
+        const left = a[sortKey];
+        const right = b[sortKey];
+        if (left === right) return direction * a.name.localeCompare(b.name);
+        return direction * (left - right);
+    });
+
+    const workbook = createWorkbook();
+    const sheet = workbook.addWorksheet('Material Types');
+    const headers = ['Material Type', 'Materials', 'Total Stock', 'Low Stock', 'Out of Stock'];
+    const subtitle = `As of ${formatManilaDateTime(new Date())}`;
+    const headerRow = addTitle(sheet, 'INVENTORY MATERIAL TYPES REPORT', subtitle, headers.length);
+    writeHeaderRow(sheet, headerRow, headers);
+
+    if (rows.length === 0) {
+        const row = headerRow + 1;
+        sheet.mergeCells(row, 1, row, headers.length);
+        const cell = sheet.getCell(row, 1);
+        cell.value = 'No material types found.';
+        cell.font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    } else {
+        rows.forEach((entry, index) => {
+            const row = headerRow + 1 + index;
+            writeDataRow(sheet, row, [
+                entry.name,
+                entry.materials,
+                entry.stock,
+                entry.low,
+                entry.out
+            ], { center: [2, 3, 4, 5] });
+        });
+
+        const totalRow = headerRow + rows.length + 2;
+        sheet.getCell(totalRow, 1).value = 'Total';
+        sheet.getCell(totalRow, 1).font = { bold: true, size: 10 };
+        [2, 3, 4, 5].forEach((column) => {
+            const cell = sheet.getCell(totalRow, column);
+            cell.value = rows.reduce((sum, entry) => {
+                const key = column === 2 ? 'materials' : column === 3 ? 'stock' : column === 4 ? 'low' : 'out';
+                return sum + entry[key];
+            }, 0);
+            cell.font = { bold: true, size: 10 };
+            cell.alignment = { horizontal: 'center' };
+        });
+    }
+
+    freezeBelow(sheet, headerRow);
+    autoWidth(sheet, { min: 14, max: 40 });
+
+    const filename = `inventory-material-types-${formatManilaDate(new Date())}.xlsx`;
+    const buffer = await workbook.xlsx.writeBuffer();
+    return { buffer, filename, count: rows.length };
 }
